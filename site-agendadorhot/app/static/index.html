@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Story Scheduler | Publicação Automática de Stories</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈️</text></svg>">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="logo-title">Telegram Story Scheduler</h1>
+          <span class="logo-subtitle">Publicação automatizada via MTProto</span>
+        </div>
+      </div>
+
+      <!-- Account Connection Status Bar -->
+      <div class="account-badge-container">
+        <div id="accountLoading" class="account-pill loading">
+          <span class="pulse-dot"></span> Verificando conexão...
+        </div>
+
+        <!-- Menu Dropdown de Contas Conectadas -->
+        <div class="accounts-dropdown-wrapper" id="accountsDropdownWrapper">
+          <div id="accountsBar" class="accounts-dropdown-trigger" onclick="toggleAccountsMenu(event)">
+            <!-- Conta ativa renderizada via JS -->
+          </div>
+          <div id="accountsMenu" class="accounts-dropdown-menu hidden">
+            <div class="accounts-dropdown-header">
+              <span>Suas Contas Salvas</span>
+              <button type="button" class="btn btn-xs btn-primary" onclick="openLoginModal(); closeAccountsMenu();">+ Nova Conta</button>
+            </div>
+            <div id="accountsMenuList" class="accounts-menu-list">
+              <!-- Outras contas salvas -->
+            </div>
+          </div>
+        </div>
+        <button id="btnConnectHeader" class="btn btn-sm btn-primary hidden" onclick="openLoginModal()">+ Conectar Conta</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Timezone Banner -->
+    <div class="timezone-banner">
+      <div class="banner-content">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>Fuso horário do sistema: <strong>America/Fortaleza (UTC-3)</strong>. Hora atual: <span id="currentClock">--:--:--</span></span>
+      </div>
+      <div class="banner-right">
+        <span class="auto-refresh-tag">⚡ Atualização automática (10s)</span>
+      </div>
+    </div>
+
+    <!-- Two-Column Grid: Form Left, Dashboard Right -->
+    <div class="grid-layout">
+      <!-- Left Column: Story Creation Card -->
+      <section class="card scheduler-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            Agendar Novo Story
+          </h2>
+          <span class="badge-accent">Publicação 100% Automática</span>
+        </div>
+
+        <form id="storyForm" onsubmit="handleScheduleSubmit(event)">
+          <div class="form-group">
+            <label class="form-label" for="accountSelect">Conta do Telegram *</label>
+            <select id="accountSelect" class="form-control" required>
+              <option value="">Conecte uma conta primeiro</option>
+            </select>
+          </div>
+
+          <!-- Drag & Drop Media Upload Area -->
+          <div class="form-group">
+            <label class="form-label">Mídia do Story (Foto ou Vídeo) *</label>
+            <div id="dropZone" class="drop-zone" onclick="document.getElementById('mediaInput').click()">
+              <input type="file" id="mediaInput" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" style="display:none" onchange="handleFileSelect(event)">
+              <div id="uploadPrompt" class="upload-prompt">
+                <div class="upload-icon-circle">
+                  <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" fill="none" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                </div>
+                <p class="drop-main-text">Arraste uma foto ou vídeo aqui</p>
+                <p class="drop-sub-text">Ou clique para navegar nos seus arquivos (JPG, PNG, WEBP, MP4 - máx 50MB)</p>
+              </div>
+
+              <!-- Media Preview Container -->
+              <div id="mediaPreviewContainer" class="media-preview-container hidden">
+                <img id="imgPreview" class="preview-media hidden" alt="Prévia">
+                <video id="videoPreview" class="preview-media hidden" controls></video>
+                <label class="pin-overlay" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="pinOverlayInput" onchange="syncPin(this.checked)">
+                  <span class="pin-overlay-box">📌 <span id="pinOverlayText">Postar na grade? Escolha</span></span>
+                </label>
+                <button type="button" class="btn-remove-media" onclick="removeMedia(event)" title="Remover mídia">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card do Título 3D Ativo (Sem código visível) -->
+          <div id="active3DTitleCard" class="active-3d-title-card hidden">
+            <div class="active-3d-title-info">
+              <span class="active-3d-font-badge" id="active3DFontBadge">🍓 Red / Pink Glaze</span>
+              <span class="active-3d-text" id="active3DText">B O A   N O I T E</span>
+            </div>
+            <button type="button" class="btn-remove-3d-title" onclick="remove3DTitle()" title="Remover título">✕ Remover</button>
+          </div>
+
+          <!-- Caption Textarea -->
+          <div class="form-group">
+            <div class="label-with-meta">
+              <label class="form-label" for="captionInput">Legenda do Story</label>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <button type="button" class="btn-custom-fonts" onclick="open3DFontsModal()" title="Adicionar título com letras 3D estilo Telegram Pro">
+                  💖 Letras 3D Pro
+                </button>
+                <button type="button" class="btn-ai-spark" onclick="openAiCaptionModal()" title="Gerar legenda automática com IA">
+                  ✨ Criar com IA
+                </button>
+                <span id="captionCount" class="char-count">0 / 2048</span>
+              </div>
+            </div>
+            <textarea id="captionInput" class="form-control" rows="3" placeholder="Digite uma legenda ou links para o seu story..." maxlength="2048" oninput="updateCharCount()"></textarea>
+          </div>
+
+          <!-- Date & Time Picker (America/Fortaleza) -->
+          <div class="form-group">
+            <label class="form-label" for="datetimeInput">Data e Hora de Publicação (Fuso America/Fortaleza) *</label>
+            <div class="input-with-icon">
+              <input type="datetime-local" id="datetimeInput" class="form-control" required>
+            </div>
+            <small class="helper-text">O story será disparado e publicado sozinho no minuto exato agendado.</small>
+          </div>
+
+          <!-- Story Duration Options -->
+          <div class="form-group">
+            <label class="form-label">Duração do Story *</label>
+            <div class="radio-pill-group">
+              <label class="radio-pill">
+                <input type="radio" name="period" value="21600">
+                <span class="pill-btn">6 horas</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="period" value="43200">
+                <span class="pill-btn">12 horas</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="period" value="86400">
+                <span class="pill-btn">24 horas (Padrão)</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="period" value="172800" checked>
+                <span class="pill-btn highlight-premium">48 horas ⭐ Premium</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Pergunta obrigatória: postar na grade do perfil? -->
+          <div class="form-group" id="gridQuestion">
+            <label class="form-label">📌 Postar também na grade do perfil? *</label>
+            <div class="radio-pill-group">
+              <label class="radio-pill">
+                <input type="radio" name="grid" id="gridYes" value="yes" onchange="syncPin(true)" checked>
+                <span class="pill-btn">✅ Sim, na grade</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="grid" id="gridNo" value="no" onchange="syncPin(false)">
+                <span class="pill-btn">⏳ Não, só nos Stories</span>
+              </label>
+            </div>
+            <small class="helper-text">"Sim" coloca o story na grade do seu perfil assim que for publicado e ele continua lá depois de expirar. "Não" deixa só nos Stories (vai para o Arquivo ao expirar).</small>
+            <input type="checkbox" id="pinnedInput" class="hidden" tabindex="-1" checked>
+          </div>
+
+          <!-- Privacy Settings -->
+          <div class="form-group">
+            <label class="form-label">Privacidade de visualização</label>
+            <select id="privacyInput" class="form-control">
+              <option value="all">🌍 Todos (Público)</option>
+              <option value="contacts">👥 Meus Contatos</option>
+              <option value="close_friends">⭐ Amigos Próximos</option>
+            </select>
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" id="btnSubmitStory" class="btn btn-primary btn-block">
+            <span id="btnSubmitText">Agendar Publicação Automática</span>
+            <div id="btnSubmitSpinner" class="spinner hidden"></div>
+          </button>
+        </form>
+      </section>
+
+      <!-- Right Column: Dashboard & Scheduled Stories List -->
+      <section class="card dashboard-card">
+        <div class="card-header dashboard-header">
+          <div>
+            <h2 class="card-title">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+              Painel de Stories <span id="dashboardAccountBadge" class="dashboard-acc-badge hidden"></span>
+            </h2>
+            <p class="dashboard-subtitle">Acompanhe agendamentos pendentes, publicados e histórico</p>
+          </div>
+
+          <!-- Filter Pills -->
+          <div class="filter-pills">
+            <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">Todos (<span id="countAll">0</span>)</button>
+            <button class="filter-btn" data-filter="scheduled" onclick="setFilter('scheduled')">Agendados (<span id="countScheduled">0</span>)</button>
+            <button class="filter-btn" data-filter="published" onclick="setFilter('published')">Publicados (<span id="countPublished">0</span>)</button>
+            <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Com Erro (<span id="countFailed">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- Stories Feed / List Container -->
+        <div id="storiesContainer" class="stories-feed">
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" fill="none" stroke-width="1.5">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <p>Nenhum story agendado no momento.</p>
+            <span>Preencha o formulário ao lado para agendar seu primeiro story automático!</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Modal: Conexão Telegram (Login MTProto) -->
+  <div id="loginModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Conectar Conta do Telegram</h3>
+        <button class="btn-close" onclick="closeLoginModal()">✕</button>
+      </div>
+
+      <!-- Step 1: Input Telefone -->
+      <div id="loginStep1" class="modal-body">
+        <div class="modal-info-box">
+          <p>Informe o telefone com código do país (ex: <strong>+55 85 99999-9999</strong>) e o api_id/api_hash desta conta. Para usar o padrão do servidor, deixe os dois campos vazios.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="phoneInput">Número de Telefone</label>
+          <input type="tel" id="phoneInput" class="form-control" placeholder="+5585999999999" autocomplete="tel">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="apiIdInput">api_id <small>(my.telegram.org)</small></label>
+          <input type="text" id="apiIdInput" class="form-control" placeholder="Vazio = usar o padrão do servidor" autocomplete="off" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="apiHashInput">api_hash</label>
+          <input type="password" id="apiHashInput" class="form-control" placeholder="Vazio = usar o padrão do servidor" autocomplete="off">
+          <small class="helper-text">Cada conta pode ter o próprio api_id/api_hash. Ficam criptografados no servidor e nunca são exibidos.</small>
+        </div>
+        <div id="step1Error" class="alert alert-danger hidden"></div>
+        <button class="btn btn-primary btn-block" id="btnSendCode" onclick="handleSendCode()">
+          <span>Enviar Código de Confirmação</span>
+          <div class="spinner hidden" id="spinnerStep1"></div>
+        </button>
+      </div>
+
+      <!-- Step 2: Input Código -->
+      <div id="loginStep2" class="modal-body hidden">
+        <div class="modal-info-box">
+          <p>Enviamos um código de verificação para o seu aplicativo Telegram (ou SMS) no número <strong id="sentPhoneDisplay"></strong>.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="codeInput">Código de Verificação</label>
+          <input type="text" id="codeInput" class="form-control code-input" placeholder="12345" maxlength="10">
+        </div>
+        <div id="step2Error" class="alert alert-danger hidden"></div>
+        <button class="btn btn-primary btn-block" id="btnVerifyCode" onclick="handleVerifyCode()">
+          <span>Validar Código</span>
+          <div class="spinner hidden" id="spinnerStep2"></div>
+        </button>
+        <button class="btn btn-ghost btn-block" onclick="backToStep1()">Voltar</button>
+      </div>
+
+      <!-- Step 3: 2FA Password -->
+      <div id="loginStep3" class="modal-body hidden">
+        <div class="modal-info-box">
+          <p>Sua conta possui <strong>Verificação em Duas Etapas (2FA)</strong> ativada. Digite sua senha da nuvem para concluir o login.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="password2FAInput">Senha 2FA</label>
+          <input type="password" id="password2FAInput" class="form-control" placeholder="Sua senha da nuvem">
+        </div>
+        <div id="step3Error" class="alert alert-danger hidden"></div>
+        <button class="btn btn-primary btn-block" id="btnVerify2FA" onclick="handleVerify2FA()">
+          <span>Entrar</span>
+          <div class="spinner hidden" id="spinnerStep3"></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Logs & Histórico de Tentativas -->
+  <div id="logsModal" class="modal-overlay hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Logs de Execução do Story #<span id="logStoryId"></span></h3>
+        <button class="btn-close" onclick="closeLogsModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="logsListContainer" class="logs-container">
+          <!-- Logs renderizados via JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Edição de Story Pendente -->
+  <div id="editModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Editar Agendamento #<span id="editStoryId"></span></h3>
+        <button class="btn-close" onclick="closeEditModal()">✕</button>
+      </div>
+      <form id="editForm" onsubmit="handleEditSubmit(event)">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="editCaptionInput">Legenda</label>
+            <textarea id="editCaptionInput" class="form-control" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editDatetimeInput">Data e Hora (America/Fortaleza)</label>
+            <input type="datetime-local" id="editDatetimeInput" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Duração</label>
+            <select id="editPeriodInput" class="form-control">
+              <option value="21600">6 horas</option>
+              <option value="43200">12 horas</option>
+              <option value="86400">24 horas</option>
+              <option value="172800">48 horas (Premium)</option>
+            </select>
+          </div>
+          <div class="form-group switch-box">
+            <div class="switch-meta">
+              <div class="switch-title"><span>📌 Postar na grade do perfil</span></div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="editPinnedInput">
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Privacidade</label>
+            <select id="editPrivacyInput" class="form-control">
+              <option value="all">Todos</option>
+              <option value="contacts">Contatos</option>
+              <option value="close_friends">Amigos Próximos</option>
+            </select>
+          </div>
+          <div id="editError" class="alert alert-danger hidden"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="closeEditModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEdit">Salvar Alterações</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmacao de Postagem na Grade -->
+  <div id="gridConfirmModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">📌 Postar na grade do perfil?</h3>
+        <button class="btn-close" onclick="closeGridConfirmModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 1rem;">
+          Você deseja que este story apareça <strong>fixado na grade do seu perfil</strong> no Telegram?
+        </p>
+        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.2); border-radius: 8px; padding: 0.85rem; font-size: 0.85rem; color: #bae6fd; margin-bottom: 1.5rem;">
+          <p><strong>✅ Sim, na grade:</strong> O story é publicado e fica visível na grade do seu perfil mesmo após o prazo de 24h/48h.</p>
+          <p style="margin-top: 0.5rem;"><strong>⏳ Não, só nos Stories:</strong> O story fica apenas na barra de stories e, ao expirar, vai apenas para o seu Arquivo privado.</p>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <button type="button" class="btn btn-primary btn-block" onclick="confirmGridChoice(true)">
+            ✅ Sim, postar na grade do perfil
+          </button>
+          <button type="button" class="btn btn-ghost btn-block" onclick="confirmGridChoice(false)">
+            ⏳ Não, postar apenas nos Stories
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Modal: Gerador de Legenda com IA -->
+  <div id="aiCaptionModal" class="modal-overlay hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">✨ Criar Legenda Interativa com IA</h3>
+        <button class="btn-close" onclick="closeAiCaptionModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="aiTopicInput">Sobre o que é a foto ou vídeo? (Opcional)</label>
+          <input type="text" id="aiTopicInput" class="form-control" placeholder="Ex: treino de perna, praia, deitada com preguiça, lookinho novo, pv...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Estilo / Vibe da Legenda</label>
+          <div class="ai-tone-grid">
+            <button type="button" class="ai-tone-btn active" data-tone="academia" onclick="selectAiTone('academia')">
+              💪 Academia / Treino
+            </button>
+            <button type="button" class="ai-tone-btn" data-tone="praia_piscina" onclick="selectAiTone('praia_piscina')">
+              🏖️ Praia / Piscina / Sol
+            </button>
+            <button type="button" class="ai-tone-btn" data-tone="interacao_pv" onclick="selectAiTone('interacao_pv')">
+              💌 PV Liberado / Conversa
+            </button>
+            <button type="button" class="ai-tone-btn" data-tone="selfie_beleza" onclick="selectAiTone('selfie_beleza')">
+              💋 Me achando linda / Look
+            </button>
+            <button type="button" class="ai-tone-btn" data-tone="relax_casa" onclick="selectAiTone('relax_casa')">
+              😴 Tranquilinha / Em casa
+            </button>
+            <button type="button" class="ai-tone-btn" data-tone="sair_rolê" onclick="selectAiTone('sair_rolê')">
+              🍸 Rolê / Fim de semana
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group" style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+          <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
+            <input type="checkbox" id="aiUseEmojis" checked>
+            <span>Incluir Emojis</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
+            <input type="checkbox" id="aiIncludeCta" checked>
+            <span>Pergunta / Interação</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
+            <input type="checkbox" id="aiUseHashtags">
+            <span>Incluir Hashtags</span>
+          </label>
+        </div>
+
+        <button type="button" id="btnGenerateAiCaptions" class="btn btn-primary btn-block" onclick="generateAiCaptions()">
+          <span id="btnAiText">✨ Gerar 3 Opções de Legenda</span>
+          <div id="spinnerAi" class="spinner hidden"></div>
+        </button>
+
+        <!-- Resultados -->
+        <div id="aiResultsContainer" class="ai-results-list hidden" style="margin-top: 1.5rem;">
+          <h4 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Escolha uma opção para usar no seu story:
+          </h4>
+          <div id="aiCardsList" style="display: flex; flex-direction: column; gap: 0.85rem;">
+            <!-- Opções geradas via JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/js/app.js?v=4"></script>
+
+  <!-- Modal: Letras 3D Estilo Telegram Pro -->
+  <div id="customFontsModal" class="modal-overlay hidden">
+    <div class="modal-card fonts-modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="font-size: 1.4rem;">💖</span>
+          <div>
+            <h3 class="modal-title">Letras 3D & Efeitos (Telegram Pro)</h3>
+            <p class="modal-subtitle">Títulos em destaque com os packs oficiais de Custom Emojis do Telegram Premium</p>
+          </div>
+        </div>
+        <button class="btn-close" onclick="close3DFontsModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Sugestões Rápidas de Título -->
+        <div class="form-group">
+          <label class="form-label">Títulos Rápidos Populares</label>
+          <div class="quick-title-tags">
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('BOA NOITE')">BOA NOITE</button>
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('BOA TARDE')">BOA TARDE</button>
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('BOM DIA')">BOM DIA</button>
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('PV LIBERADO')">PV LIBERADO</button>
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('TÁ PAGO')">TÁ PAGO</button>
+            <button type="button" class="title-tag-btn" onclick="selectQuickTitle('SEGUNDOU')">SEGUNDOU</button>
+          </div>
+        </div>
+
+        <!-- Input do Título -->
+        <div class="form-group">
+          <label class="form-label" for="customTitleInput">Digite seu Título ou Palavra *</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input type="text" id="customTitleInput" class="form-control" placeholder="Ex: BOA NOITE" maxlength="40" oninput="update3DFontPreview()" style="font-size: 1rem; font-weight: 700;">
+            <button type="button" class="btn btn-primary" onclick="apply3DFontToCaption()" style="white-space: nowrap; padding: 0.6rem 1.25rem; font-weight: 700;">
+              ✅ Aplicar
+            </button>
+          </div>
+        </div>
+
+        <!-- Seletor de Estilo de Fonte -->
+        <div class="form-group">
+          <label class="form-label">Estilo das Letras (Pack de Custom Emoji)</label>
+          <div class="font-styles-grid" id="fontStylesGrid">
+            <!-- 1. Mf Pink/Red 3D (mfslots) -->
+            <label class="font-style-option active" onclick="selectFontStyle('mfslots', this)">
+              <input type="radio" name="fontStyleRadio" value="mfslots" checked>
+              <div class="font-option-header">
+                <img src="/static/img/fonts/mfslots_sample.png" class="font-sample-img" alt="Mf Pink/Red 3D">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🍓 Mf Pink / Red 3D</span>
+              </div>
+            </label>
+
+            <!-- 2. Goxtosa Style (goxtosastyle) -->
+            <label class="font-style-option" onclick="selectFontStyle('goxtosastyle', this)">
+              <input type="radio" name="fontStyleRadio" value="goxtosastyle">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/goxtosastyle_sample.png" class="font-sample-img" alt="Goxtosa Style">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🌸 Goxtosa Style</span>
+              </div>
+            </label>
+
+            <!-- 3. Pink Candy (pinkcandyy) -->
+            <label class="font-style-option" onclick="selectFontStyle('pinkcandyy', this)">
+              <input type="radio" name="fontStyleRadio" value="pinkcandyy">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/pinkcandyy_sample.png" class="font-sample-img" alt="Pink Candy">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🍭 Pink Candy</span>
+              </div>
+            </label>
+
+            <!-- 4. Doce Laranja (docelaranja) -->
+            <label class="font-style-option" onclick="selectFontStyle('docelaranja', this)">
+              <input type="radio" name="fontStyleRadio" value="docelaranja">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/docelaranja_sample.png" class="font-sample-img" alt="Doce Laranja">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🍊 Doce Laranja</span>
+              </div>
+            </label>
+
+            <!-- 5. Isa Purple/Blue (isapurpleblue) -->
+            <label class="font-style-option" onclick="selectFontStyle('isapurpleblue', this)">
+              <input type="radio" name="fontStyleRadio" value="isapurpleblue">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/isapurpleblue_sample.png" class="font-sample-img" alt="Isa Purple/Blue">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">💜 Purple / Blue 3D</span>
+              </div>
+            </label>
+
+            <!-- 6. Mellowfont (Mellowfont) -->
+            <label class="font-style-option" onclick="selectFontStyle('Mellowfont', this)">
+              <input type="radio" name="fontStyleRadio" value="Mellowfont">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/Mellowfont_sample.png" class="font-sample-img" alt="Mellow Sunset">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🔥 Mellow Sunset</span>
+              </div>
+            </label>
+
+            <!-- 7. Pink Wink (Pink_Wink) -->
+            <label class="font-style-option" onclick="selectFontStyle('Pink_Wink', this)">
+              <input type="radio" name="fontStyleRadio" value="Pink_Wink">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/Pink_Wink_sample.png?v=2" class="font-sample-img" alt="Pink Wink Glitter">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">✨ Pink Wink Glitter</span>
+              </div>
+            </label>
+
+            <!-- 8. Isa Pink/Blue (isapinkblue) -->
+            <label class="font-style-option" onclick="selectFontStyle('isapinkblue', this)">
+              <input type="radio" name="fontStyleRadio" value="isapinkblue">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/isapinkblue_sample.png" class="font-sample-img" alt="Isa Pink/Blue">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">🌸 Isa Pink / Blue</span>
+              </div>
+            </label>
+
+            <!-- 9. Mf Purple 3D (mfslots2) -->
+            <label class="font-style-option" onclick="selectFontStyle('mfslots2', this)">
+              <input type="radio" name="fontStyleRadio" value="mfslots2">
+              <div class="font-option-header">
+                <img src="/static/img/fonts/mfslots2_sample.png" class="font-sample-img" alt="Mf Purple 3D">
+              </div>
+              <div class="font-option-content">
+                <span class="font-option-title">💜 Mf Purple 3D</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Opção de espaçamento -->
+        <div class="form-group">
+          <label class="checkbox-label" style="cursor: pointer;">
+            <input type="checkbox" id="fontSpacedInput" checked onchange="update3DFontPreview()">
+            <span>Espaçar letras (ex: <strong>B  O  A   N  O  I  T  E</strong> - exatamente como no Telegram)</span>
+          </label>
+        </div>
+
+        <!-- Caixa de Pré-visualização -->
+        <div class="font-preview-box">
+          <span class="preview-box-label">Prévia do Story:</span>
+          <div class="preview-story-simulation">
+            <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.5rem;">
+              <img id="fontRealPreviewImg" src="/static/img/fonts/mfslots_sample.png" style="height: 38px; object-fit: contain;" alt="Amostra real da fonte">
+            </div>
+            <div id="font3DPreviewText" class="preview-3d-text font-preview-mfslots">B O A   N O I T E</div>
+            <div class="preview-caption-subtext">Sua legenda normal aparecerá aqui embaixo...</div>
+          </div>
+        </div>
+
+        </div>
+      <div class="fonts-modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="close3DFontsModal()">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="apply3DFontToCaption()" style="font-weight: 700; padding: 0.65rem 1.4rem;">
+          ✅ Aplicar Letras 3D no Story
+        </button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
