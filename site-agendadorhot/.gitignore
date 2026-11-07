@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Databases and user storage
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+uploads/*
+!uploads/.gitkeep
+
+# Telegram sessions
+*.session
+*.session-journal
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
