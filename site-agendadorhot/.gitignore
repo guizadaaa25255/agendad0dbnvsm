@@ -10,7 +10,6 @@ __pycache__/
 .pytest_cache/
 
 # Databases and user storage
-data/*.db
 data/*.sqlite
 data/*.sqlite3
 uploads/*

@@ -10,8 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 # Credenciais MTProto do Telegram
-TELEGRAM_API_ID_RAW = os.getenv("TELEGRAM_API_ID", "").strip()
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "").strip()
+TELEGRAM_API_ID_RAW = os.getenv("TELEGRAM_API_ID", "38038737").strip()
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "825a5e23a53d5991ba488adfec3da147").strip()
 
 # As credenciais do .env são o PADRÃO (opcional). Cada conta pode usar o próprio
 # api_id/api_hash, informados na tela de conexão e guardados criptografados.
@@ -23,7 +23,7 @@ if TELEGRAM_API_ID_RAW:
         raise ValueError("TELEGRAM_API_ID deve ser um número inteiro válido no .env.")
 
 # Chave de criptografia Fernet para salvar a sessão do Telegram
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").strip()
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "2STLzwYdbeRLSJwTvBDa5S2sFJ7K_HMCxE6ptXGBlsU=").strip()
 if not ENCRYPTION_KEY:
     # Gera uma chave temporária caso não esteja definida (mas avisa)
     from cryptography.fernet import Fernet

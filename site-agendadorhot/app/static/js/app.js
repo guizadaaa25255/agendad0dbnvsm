@@ -404,6 +404,13 @@ function switchActiveAccount(accId, event) {
   closeAccountsMenu();
   const acc = savedAccountsList.find(a => a.id === accId);
   if (acc) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('account_id', String(acc.id));
+      url.searchParams.set('phone', acc.phone || '');
+      url.searchParams.set('name', acc.first_name || acc.username || '');
+      window.history.replaceState({}, '', url.toString());
+    } catch (e) {}
     showToast(`Conta ativa alterada para: ${acc.first_name || acc.username || acc.phone}`, 'info');
   }
   loadStories();
@@ -492,8 +499,38 @@ async function checkAccountStatus(preferredAccountId = null) {
 
     savedAccountsList = data.accounts || [];
 
+    // Suporte a redirecionamento direto de conta via URL (?account_id=...&phone=...&name=...)
+    let urlMatchedId = null;
+    if (!window._urlAccountApplied && savedAccountsList.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const urlPhone = params.get('phone');
+      const urlAccId = params.get('account_id') || params.get('account');
+      const urlName = params.get('name');
+      const normPhone = s => String(s || '').replace(/\D/g, '');
+
+      let matched = null;
+      if (urlPhone) {
+        const np = normPhone(urlPhone);
+        matched = savedAccountsList.find(a => normPhone(a.phone) === np || (np.length >= 9 && normPhone(a.phone).endsWith(np.slice(-9))));
+      }
+      if (!matched && urlAccId) {
+        matched = savedAccountsList.find(a => String(a.id) === String(urlAccId));
+      }
+      if (!matched && urlName) {
+        const nn = urlName.trim().toLowerCase();
+        matched = savedAccountsList.find(a => (a.first_name || a.username || '').trim().toLowerCase() === nn);
+      }
+      if (matched) {
+        urlMatchedId = matched.id;
+        window._urlAccountApplied = true;
+        setTimeout(() => {
+          showToast(`Conta sincronizada automaticamente: ${matched.first_name || matched.username || matched.phone}`, 'info');
+        }, 300);
+      }
+    }
+
     // Seletor de conta do formulário
-    const prev = preferredAccountId || currentSelectedAccountId || (select ? select.value : null);
+    const prev = urlMatchedId || preferredAccountId || currentSelectedAccountId || (select ? select.value : null);
     if (savedAccountsList.length === 0) {
       if (select) select.innerHTML = '<option value="">Conecte uma conta primeiro</option>';
       currentSelectedAccountId = null;
