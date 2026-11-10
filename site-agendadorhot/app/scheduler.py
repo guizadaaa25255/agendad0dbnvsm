@@ -123,15 +123,16 @@ async def execute_story_publish(story_id: int):
             )
             db.add(log_entry)
 
-            # Lógica de retentativa automática (máximo 3 tentativas)
+            # Lógica de retentativa automática (máximo 3 tentativas) com delay aleatório curto (não fixo)
             if story.retry_count < 3:
+                import random
                 story.status = "SCHEDULED"
-                # Reagenda para tentar novamente em 60 segundos
-                retry_time = datetime.now(APP_TIMEZONE) + timedelta(seconds=60)
+                retry_delay_sec = round(random.uniform(14.0, 26.0) + random.uniform(0.15, 0.85), 2)
+                retry_time = datetime.now(APP_TIMEZONE) + timedelta(seconds=retry_delay_sec)
                 schedule_story_job(story.id, retry_time)
                 logger.warning(
                     f"[Scheduler] Tentativa {story.retry_count} falhou para Story #{story_id}. "
-                    f"Nova tentativa agendada para daqui a 60s: {error_msg}"
+                    f"Nova tentativa agendada para daqui a {retry_delay_sec}s: {error_msg}"
                 )
             else:
                 story.status = "FAILED"
@@ -169,8 +170,10 @@ def reload_pending_jobs():
                 # O horário passou enquanto o servidor estava offline
                 diff_minutes = (now_fortaleza - run_time).total_seconds() / 60.0
                 if diff_minutes <= 15:
-                    # Se atrasou menos de 15 minutos, executa em 5 segundos
-                    immediate_time = now_fortaleza + timedelta(seconds=5)
+                    # Se atrasou menos de 15 minutos, executa com delay aleatório curto (nunca fixo)
+                    import random
+                    short_jitter = round(random.uniform(2.2, 5.4) + random.uniform(0.11, 0.49), 2)
+                    immediate_time = now_fortaleza + timedelta(seconds=short_jitter)
                     schedule_story_job(story.id, immediate_time)
                     logger.info(f"[Scheduler] Story #{story.id} atrasado por {int(diff_minutes)}m recarregado para execução imediata.")
                     count += 1

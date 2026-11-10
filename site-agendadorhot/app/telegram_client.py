@@ -283,6 +283,9 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
         if not os.path.exists(story.media_path):
             raise FileNotFoundError(f"Arquivo de mídia não encontrado: {story.media_path}")
 
+        # Delay aleatório curto antes do upload/envio automático para evitar padrão robótico
+        await asyncio.sleep(round(random.uniform(1.3, 3.1) + random.uniform(0.08, 0.42), 3))
+
         uploaded_file = await client.upload_file(story.media_path)
 
         if story.media_type == "photo":
@@ -358,6 +361,8 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
                 story._grid_warning = "Story publicado, mas não consegui o ID para colocá-lo na grade do perfil."
             else:
                 try:
+                    # Delay aleatório curto antes de fixar na grade do perfil
+                    await asyncio.sleep(round(random.uniform(1.2, 2.6) + random.uniform(0.07, 0.35), 3))
                     await client(TogglePinnedRequest(peer=InputPeerSelf(), id=[story_id], pinned=True))
                 except Exception as e:
                     story._grid_warning = f"Story publicado, mas falhou ao colocá-lo na grade do perfil: {e}"
