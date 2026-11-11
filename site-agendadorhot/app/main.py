@@ -1,4 +1,5 @@
 import os
+import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,28 @@ from app.scheduler import scheduler, reload_pending_jobs
 from app.routes import auth, stories, logs, ai, fonts
 
 
+async def _render_keepalive_loop():
+    """Mantém o agendador e o painel bot-atendimento acordados no Render Free."""
+    import urllib.request
+    urls = [
+        "https://agendador-hot.onrender.com/api/health",
+        "https://bot-atendimento-kkh8.onrender.com/health",
+    ]
+
+    def _ping(u: str):
+        req = urllib.request.Request(u, headers={"User-Agent": "Scheduler-KeepAlive/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as _:
+            pass
+
+    while True:
+        await asyncio.sleep(240)
+        for u in urls:
+            try:
+                await asyncio.to_thread(_ping, u)
+            except Exception:
+                pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Ciclo de vida da aplicação: inicializa banco, agenda tarefas e desliga com segurança."""
@@ -31,7 +54,14 @@ async def lifespan(app: FastAPI):
     # 3. Recarrega agendamentos pendentes do SQLite
     reload_pending_jobs()
 
+    keepalive_task = None
+    if os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"):
+        keepalive_task = asyncio.create_task(_render_keepalive_loop())
+
     yield
+
+    if keepalive_task and not keepalive_task.done():
+        keepalive_task.cancel()
 
     # Encerramento gracioso do agendador
     if scheduler.running:
@@ -67,7 +97,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/media", StaticFiles(directory=str(UPLOAD_DIR)), name="media")
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     """Endpoint de verificação de integridade e hora atual no fuso de Fortaleza."""
     now_fortaleza = datetime.now(APP_TIMEZONE)
