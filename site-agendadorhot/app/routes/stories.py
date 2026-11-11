@@ -29,7 +29,7 @@ from app.models import ScheduledStory, StoryLog, TelegramAccount
 from app.schemas import StoryResponse, StoryUpdateRequest, StoryLogResponse
 from app.scheduler import schedule_story_job, cancel_story_job
 from app.telegram_client import toggle_story_pinned_on_telegram
-from app.media_utils import strip_video_audio
+from app.media_utils import prepare_story_video
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
 
@@ -181,18 +181,18 @@ async def create_story(
                 )
             await out_file.write(content)
 
-    # 5.1 Remove áudio do vídeo caso o usuário tenha solicitado
+    # 5.1 Prepara/normaliza o vídeo para o padrão oficial de Stories do Telegram (MP4 H.264 720x1280 + remove áudio se solicitado)
     audio_removed = False
-    if media_type == "video" and remove_audio:
+    if media_type == "video":
         try:
-            await asyncio.to_thread(strip_video_audio, dest_path)
-            audio_removed = True
+            dest_path = await asyncio.to_thread(prepare_story_video, dest_path, remove_audio=remove_audio)
+            audio_removed = bool(remove_audio)
         except Exception as exc:
             if dest_path.exists():
                 dest_path.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Não foi possível remover o áudio do vídeo: {exc}"
+                detail=f"Não foi possível processar o vídeo para o Telegram: {exc}"
             )
 
     # 6. Registra no banco de dados SQLite

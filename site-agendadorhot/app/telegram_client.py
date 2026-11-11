@@ -5,6 +5,7 @@ import uuid
 import asyncio
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone
+from pathlib import Path
 
 from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
@@ -23,6 +24,11 @@ from sqlalchemy.orm import Session
 from app.config import TELEGRAM_API_ID, TELEGRAM_API_HASH
 from app.security import encrypt_session, decrypt_session
 from app.models import TelegramAccount, ScheduledStory
+from app.media_utils import (
+    inspect_video_metadata,
+    extract_video_thumbnail,
+    prepare_story_video,
+)
 
 
 # Fluxos de login em andamento (token -> cliente, telefone, hash do código, credenciais)
@@ -286,18 +292,53 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
         # Delay aleatório curto antes do upload/envio automático para evitar padrão robótico
         await asyncio.sleep(round(random.uniform(1.3, 3.1) + random.uniform(0.08, 0.42), 3))
 
-        uploaded_file = await client.upload_file(story.media_path)
+        media_path_obj = Path(story.media_path)
+        thumb_path: Optional[Path] = None
 
-        if story.media_type == "photo":
-            media = InputMediaUploadedPhoto(file=uploaded_file)
-        elif story.media_type == "video":
-            media = InputMediaUploadedDocument(
-                file=uploaded_file,
-                mime_type="video/mp4",
-                attributes=[DocumentAttributeVideo(duration=15, w=720, h=1280, supports_streaming=True)]
-            )
-        else:
-            raise ValueError(f"Tipo de mídia não suportado: {story.media_type}")
+        try:
+            if story.media_type == "photo":
+                uploaded_file = await client.upload_file(str(media_path_obj))
+                media = InputMediaUploadedPhoto(file=uploaded_file)
+            elif story.media_type == "video":
+                meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
+                needs_normalize = (
+                    media_path_obj.suffix.lower() != ".mp4"
+                    or meta["width"] != 720
+                    or meta["height"] != 1280
+                    or meta["vcodec"] != "h264"
+                    or not meta["has_audio"]
+                    or meta["duration"] > 60
+                )
+                if needs_normalize:
+                    media_path_obj = await asyncio.to_thread(
+                        prepare_story_video, media_path_obj, remove_audio=False
+                    )
+                    story.media_path = str(media_path_obj)
+                    db.commit()
+                    meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
+
+                thumb_path = await asyncio.to_thread(extract_video_thumbnail, media_path_obj)
+                uploaded_file = await client.upload_file(str(media_path_obj))
+                uploaded_thumb = await client.upload_file(str(thumb_path)) if thumb_path else None
+
+                media = InputMediaUploadedDocument(
+                    file=uploaded_file,
+                    thumb=uploaded_thumb,
+                    mime_type="video/mp4",
+                    attributes=[
+                        DocumentAttributeVideo(
+                            duration=float(meta["duration"]),
+                            w=int(meta["width"]),
+                            h=int(meta["height"]),
+                            supports_streaming=True,
+                        )
+                    ],
+                )
+            else:
+                raise ValueError(f"Tipo de mídia não suportado: {story.media_type}")
+        finally:
+            if thumb_path and thumb_path.exists():
+                thumb_path.unlink(missing_ok=True)
 
         if story.privacy == "contacts":
             privacy_rules = [InputPrivacyValueAllowContacts()]
