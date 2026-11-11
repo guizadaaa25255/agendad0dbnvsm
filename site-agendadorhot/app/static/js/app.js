@@ -306,15 +306,32 @@ function processSelectedFile(file) {
   prompt.classList.add('hidden');
   previewContainer.classList.remove('hidden');
 
+  const audioGroup = document.getElementById('videoAudioGroup');
+  const keepAudioRadio = document.getElementById('keepAudioRadio');
+
   if (file.type.startsWith('image/')) {
     imgEl.src = fileUrl;
     imgEl.classList.remove('hidden');
     videoEl.classList.add('hidden');
     videoEl.pause();
+    videoEl.muted = false;
+    if (audioGroup) audioGroup.classList.add('hidden');
+    if (keepAudioRadio) keepAudioRadio.checked = true;
   } else if (file.type.startsWith('video/')) {
     videoEl.src = fileUrl;
     videoEl.classList.remove('hidden');
     imgEl.classList.add('hidden');
+    if (keepAudioRadio) keepAudioRadio.checked = true;
+    videoEl.muted = false;
+    if (audioGroup) audioGroup.classList.remove('hidden');
+  }
+}
+
+function syncVideoAudioPreview() {
+  const removeAudio = document.getElementById('removeAudioRadio')?.checked === true;
+  const videoEl = document.getElementById('videoPreview');
+  if (videoEl) {
+    videoEl.muted = removeAudio;
   }
 }
 
@@ -354,11 +371,17 @@ function removeMedia(e) {
   renderPinOverlay();
   document.getElementById('mediaInput').value = '';
   document.getElementById('imgPreview').src = '';
-  document.getElementById('videoPreview').src = '';
+  const videoEl = document.getElementById('videoPreview');
+  videoEl.src = '';
+  videoEl.muted = false;
   document.getElementById('imgPreview').classList.add('hidden');
-  document.getElementById('videoPreview').classList.add('hidden');
+  videoEl.classList.add('hidden');
   document.getElementById('mediaPreviewContainer').classList.add('hidden');
   document.getElementById('uploadPrompt').classList.remove('hidden');
+  const audioGroup = document.getElementById('videoAudioGroup');
+  if (audioGroup) audioGroup.classList.add('hidden');
+  const keepAudioRadio = document.getElementById('keepAudioRadio');
+  if (keepAudioRadio) keepAudioRadio.checked = true;
 }
 
 // ==========================================================================
@@ -779,6 +802,8 @@ async function handleScheduleSubmit(e) {
   const pinnedVal = document.getElementById('pinnedInput').checked;
   const privacyVal = document.getElementById('privacyInput').value;
   const captionVal = document.getElementById('captionInput').value;
+  const isVideoFile = fileInput.files[0] && fileInput.files[0].type.startsWith('video/');
+  const removeAudioVal = isVideoFile && (document.getElementById('removeAudioRadio')?.checked === true);
 
   const formData = new FormData();
   formData.append('account_id', accountVal);
@@ -787,6 +812,7 @@ async function handleScheduleSubmit(e) {
   formData.append('period', periodVal);
   formData.append('pinned', pinnedVal);
   formData.append('privacy', privacyVal);
+  formData.append('remove_audio', removeAudioVal ? 'true' : 'false');
   let finalCaption = captionVal || '';
   if (current3DTitleData && current3DTitleData.html) {
     finalCaption = finalCaption.trim() ? `${current3DTitleData.html}\n${finalCaption.trim()}` : current3DTitleData.html;

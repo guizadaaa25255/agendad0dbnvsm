@@ -122,6 +122,22 @@
             </div>
           </div>
 
+          <!-- Opção de Áudio (aparece automaticamente ao selecionar um vídeo) -->
+          <div class="form-group hidden" id="videoAudioGroup">
+            <label class="form-label">🔊 Áudio do Vídeo *</label>
+            <div class="radio-pills grid-2">
+              <label class="radio-pill">
+                <input type="radio" name="removeAudio" id="keepAudioRadio" value="false" onchange="syncVideoAudioPreview()" checked>
+                <span class="pill-btn">🔊 Manter áudio</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="removeAudio" id="removeAudioRadio" value="true" onchange="syncVideoAudioPreview()">
+                <span class="pill-btn">🔇 Tirar áudio (Sem som)</span>
+              </label>
+            </div>
+            <small class="helper-text">Se escolher "Tirar áudio", o vídeo será postado totalmente mudo no Telegram.</small>
+          </div>
+
           <!-- Card do Título 3D Ativo (Sem código visível) -->
           <div id="active3DTitleCard" class="active-3d-title-card hidden">
             <div class="active-3d-title-info">
@@ -489,7 +505,7 @@
 <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/static/js/app.js?v=4"></script>
+  <script src="/static/js/app.js?v=5"></script>
 
   <!-- Modal: Letras 3D Estilo Telegram Pro -->
   <div id="customFontsModal" class="modal-overlay hidden">

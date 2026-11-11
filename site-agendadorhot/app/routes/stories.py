@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 import aiofiles
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ from app.models import ScheduledStory, StoryLog, TelegramAccount
 from app.schemas import StoryResponse, StoryUpdateRequest, StoryLogResponse
 from app.scheduler import schedule_story_job, cancel_story_job
 from app.telegram_client import toggle_story_pinned_on_telegram
+from app.media_utils import strip_video_audio
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
 
@@ -102,6 +104,7 @@ async def create_story(
     period: int = Form(86400, description="Duração em segundos: 21600 (6h), 43200 (12h), 86400 (24h) ou 172800 (48h)"),
     pinned: bool = Form(False, description="Fixar no perfil do Telegram"),
     privacy: str = Form("all", description="Privacidade: all, contacts ou close_friends"),
+    remove_audio: bool = Form(False, description="Remover faixa de áudio caso seja vídeo"),
     db: Session = Depends(get_db)
 ):
     """
@@ -178,6 +181,20 @@ async def create_story(
                 )
             await out_file.write(content)
 
+    # 5.1 Remove áudio do vídeo caso o usuário tenha solicitado
+    audio_removed = False
+    if media_type == "video" and remove_audio:
+        try:
+            await asyncio.to_thread(strip_video_audio, dest_path)
+            audio_removed = True
+        except Exception as exc:
+            if dest_path.exists():
+                dest_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Não foi possível remover o áudio do vídeo: {exc}"
+            )
+
     # 6. Registra no banco de dados SQLite
     story = ScheduledStory(
         account_id=account_id,
@@ -196,11 +213,12 @@ async def create_story(
     db.refresh(story)
 
     # 7. Adiciona log inicial
+    audio_note = " Áudio removido do vídeo conforme selecionado." if audio_removed else ""
     init_log = StoryLog(
         story_id=story.id,
         attempt_number=0,
         status="INFO",
-        message=f"Story criado e agendado para {scheduled_dt_fortaleza.strftime('%d/%m/%Y às %H:%M:%S')} (Fuso: America/Fortaleza)."
+        message=f"Story criado e agendado para {scheduled_dt_fortaleza.strftime('%d/%m/%Y às %H:%M:%S')} (Fuso: America/Fortaleza).{audio_note}"
     )
     db.add(init_log)
     db.commit()

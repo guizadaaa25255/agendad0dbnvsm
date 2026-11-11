@@ -12,3 +12,4 @@ pydantic>=2.7.0
 tzlocal>=5.0
 requests>=2.31.0
 pytest>=8.0.0
+imageio-ffmpeg>=0.4.9
