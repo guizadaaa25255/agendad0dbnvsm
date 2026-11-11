@@ -33,6 +33,7 @@ class AccountItem(BaseModel):
     username: Optional[str] = None
     is_premium: bool = False
     connected_at: Optional[datetime] = None
+    avatar_url: Optional[str] = None
 
 
 class AccountStatusResponse(BaseModel):

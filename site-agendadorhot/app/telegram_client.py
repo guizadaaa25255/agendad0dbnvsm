@@ -21,7 +21,7 @@ from telethon.tl.types import (
 )
 from sqlalchemy.orm import Session
 
-from app.config import TELEGRAM_API_ID, TELEGRAM_API_HASH
+from app.config import TELEGRAM_API_ID, TELEGRAM_API_HASH, AVATARS_DIR
 from app.security import encrypt_session, decrypt_session
 from app.models import TelegramAccount, ScheduledStory
 from app.media_utils import (
@@ -198,6 +198,13 @@ async def _finalize_account_connection(login_data: Dict[str, Any], db: Session, 
         db.refresh(account)
         _PENDING_LOGINS.pop(session_token, None)
 
+        # Baixa a foto de perfil da conta logo na conexão
+        try:
+            avatar_dest = get_avatar_path(account.id)
+            await client.download_profile_photo(me, file=str(avatar_dest))
+        except Exception:
+            pass
+
         return {
             "status": "connected",
             "message": "Conta do Telegram conectada com sucesso!",
@@ -205,10 +212,64 @@ async def _finalize_account_connection(login_data: Dict[str, Any], db: Session, 
             "phone": account.phone,
             "first_name": account.first_name,
             "username": account.username,
-            "is_premium": account.is_premium
+            "is_premium": account.is_premium,
+            "avatar_url": f"/api/auth/avatar/{account.id}",
         }
     finally:
         await client.disconnect()
+
+
+_AVATAR_LOCKS: Dict[int, asyncio.Lock] = {}
+_AVATAR_CACHE_TTL_SEC = 12 * 3600  # Atualiza foto a cada 12 horas se necessário
+
+
+def get_avatar_path(account_id: int) -> Path:
+    return AVATARS_DIR / f"account_{account_id}.jpg"
+
+
+async def fetch_or_get_account_avatar(db: Session, account_id: int) -> Optional[Path]:
+    """
+    Retorna a foto de perfil da conta salva em cache ou busca direto no Telegram se ainda não existir.
+    """
+    account = get_account(db, account_id)
+    if not account:
+        return None
+
+    avatar_path = get_avatar_path(account_id)
+    if avatar_path.exists() and avatar_path.stat().st_size > 0:
+        age_sec = time.time() - avatar_path.stat().st_mtime
+        if age_sec < _AVATAR_CACHE_TTL_SEC:
+            return avatar_path
+
+    if not account.encrypted_session:
+        return avatar_path if avatar_path.exists() else None
+
+    lock = _AVATAR_LOCKS.setdefault(account_id, asyncio.Lock())
+    async with lock:
+        if avatar_path.exists() and avatar_path.stat().st_size > 0:
+            if (time.time() - avatar_path.stat().st_mtime) < _AVATAR_CACHE_TTL_SEC:
+                return avatar_path
+
+        try:
+            session_str = decrypt_session(account.encrypted_session)
+            if not session_str:
+                return None
+            cid, chash = account_credentials(account)
+            client = TelegramClient(StringSession(session_str), cid, chash)
+            await client.connect()
+            try:
+                if await client.is_user_authorized():
+                    downloaded = await client.download_profile_photo("me", file=str(avatar_path))
+                    if downloaded and Path(downloaded).exists():
+                        return Path(downloaded)
+            finally:
+                await client.disconnect()
+        except Exception:
+            if avatar_path.exists() and avatar_path.stat().st_size > 0:
+                return avatar_path
+            return None
+
+    return avatar_path if avatar_path.exists() and avatar_path.stat().st_size > 0 else None
 
 
 def list_active_accounts(db: Session) -> List[TelegramAccount]:
@@ -248,6 +309,10 @@ async def disconnect_telegram_account(db: Session, account_id: int) -> bool:
     account.encrypted_api_hash = None
     account.updated_at = datetime.now(timezone.utc)
     db.commit()
+    try:
+        get_avatar_path(account_id).unlink(missing_ok=True)
+    except Exception:
+        pass
     return True
 
 

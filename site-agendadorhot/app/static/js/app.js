@@ -439,6 +439,19 @@ function switchActiveAccount(accId, event) {
   loadStories();
 }
 
+function renderAvatarHtml(acc) {
+  const rawName = (acc.first_name || acc.username || 'C').trim();
+  const initials = escapeHtml(rawName.substring(0, 2).toUpperCase());
+  const avatarUrl = acc.avatar_url || `/api/auth/avatar/${acc.id}`;
+  return `
+    <div class="user-avatar">
+      <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(rawName)}" class="user-avatar-img"
+           onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <span class="user-avatar-fallback" style="display:none;">${initials}</span>
+    </div>
+  `;
+}
+
 function renderAccountsHeader() {
   const bar = document.getElementById('accountsBar');
   const menuList = document.getElementById('accountsMenuList');
@@ -474,7 +487,7 @@ function renderAccountsHeader() {
   // Renderiza pílula principal no topo (com seta e indicador de outras contas salvas)
   bar.innerHTML = `
     <div class="account-pill connected account-pill-clickable" title="Clique para trocar de conta ou ver contas salvas">
-      <div class="user-avatar">${escapeHtml(activeName.substring(0, 2).toUpperCase())}</div>
+      ${renderAvatarHtml(activeAcc)}
       <div class="account-meta">
         <div class="account-name-row">
           <span class="account-name">${activeName}</span>
@@ -493,7 +506,7 @@ function renderAccountsHeader() {
     return `
       <div class="account-menu-item ${isCurrent ? 'active' : ''}" onclick="switchActiveAccount(${a.id}, event)">
         <div class="account-item-info">
-          <div class="user-avatar">${escapeHtml(name.substring(0, 2).toUpperCase())}</div>
+          ${renderAvatarHtml(a)}
           <div class="account-item-meta">
             <span class="account-item-name">
               ${name}

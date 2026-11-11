@@ -165,3 +165,29 @@ def test_reject_story_without_connected_account():
 def test_status_never_exposes_credentials(account_id):
     body = client.get("/api/auth/status").text
     assert "api_hash" not in body and "api_id" not in body and "session" not in body
+
+
+def test_account_avatar_url_and_endpoint(account_id):
+    from app.telegram_client import get_avatar_path
+
+    status_res = client.get("/api/auth/status")
+    assert status_res.status_code == 200
+    accounts = status_res.json()["accounts"]
+    acc = next(a for a in accounts if a["id"] == account_id)
+    assert acc["avatar_url"] == f"/api/auth/avatar/{account_id}"
+
+    avatar_file = get_avatar_path(account_id)
+    avatar_file.unlink(missing_ok=True)
+    # Sem foto no cache/sessão fake -> retorna 404 graciosamente
+    missing_res = client.get(acc["avatar_url"])
+    assert missing_res.status_code == 404
+
+    # Com foto salva no cache -> serve a imagem JPEG
+    avatar_file.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg-data")
+    try:
+        ok_res = client.get(acc["avatar_url"])
+        assert ok_res.status_code == 200
+        assert ok_res.headers["content-type"].startswith("image/jpeg")
+        assert ok_res.content == b"\xff\xd8\xff\xe0fake-jpeg-data"
+    finally:
+        avatar_file.unlink(missing_ok=True)

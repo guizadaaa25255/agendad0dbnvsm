@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas import (
@@ -14,7 +15,8 @@ from app.telegram_client import (
     verify_login_code,
     verify_2fa_password,
     list_active_accounts,
-    disconnect_telegram_account
+    disconnect_telegram_account,
+    fetch_or_get_account_avatar
 )
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticação Telegram"])
@@ -26,11 +28,25 @@ async def check_status(db: Session = Depends(get_db)):
     accounts = [
         AccountItem(
             id=a.id, phone=a.phone, first_name=a.first_name, username=a.username,
-            is_premium=bool(a.is_premium), connected_at=a.connected_at
+            is_premium=bool(a.is_premium), connected_at=a.connected_at,
+            avatar_url=f"/api/auth/avatar/{a.id}"
         )
         for a in list_active_accounts(db)
     ]
     return AccountStatusResponse(connected=len(accounts) > 0, accounts=accounts)
+
+
+@router.get("/avatar/{account_id}")
+async def get_account_avatar(account_id: int, db: Session = Depends(get_db)):
+    """Retorna a foto de perfil da conta do Telegram (com cache local e fallback automático)."""
+    avatar_path = await fetch_or_get_account_avatar(db, account_id)
+    if not avatar_path or not avatar_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta sem foto de perfil.")
+    return FileResponse(
+        str(avatar_path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"}
+    )
 
 
 @router.post("/send-code", response_model=SendCodeResponse)
