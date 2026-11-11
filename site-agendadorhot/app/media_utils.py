@@ -23,7 +23,8 @@ def _get_ffmpeg_exe() -> str:
 
 def inspect_video_metadata(video_path: Path) -> dict:
     """
-    Extrai duração (em segundos), largura, altura, codec e presença de áudio via ffmpeg.
+    Extrai duração (em segundos), largura, altura (considerando rotação),
+    codec de vídeo, pixel format e presença/codec de áudio via ffmpeg.
     """
     ffmpeg_exe = _get_ffmpeg_exe()
     res = subprocess.run(
@@ -44,25 +45,47 @@ def inspect_video_metadata(video_path: Path) -> dict:
 
     width, height = 720, 1280
     vcodec = ""
+    pix_fmt = ""
     for line in stderr.splitlines():
         if "Video:" in line:
             codec_match = re.search(r"Video:\s*([a-zA-Z0-9_]+)", line)
             if codec_match:
                 vcodec = codec_match.group(1).lower()
+            pix_match = re.search(r",\s*(yuv[a-zA-Z0-9]+)", line)
+            if pix_match:
+                pix_fmt = pix_match.group(1).lower()
             dim_match = re.search(r"(?:,\s*|\s)(\d{2,5})x(\d{2,5})(?:\s|,|\[|$)", line)
             if dim_match:
                 width = int(dim_match.group(1))
                 height = int(dim_match.group(2))
             break
 
+    # Detecta metadado de rotação de vídeo de celular (-90 / 90 / 270)
+    rot_match = re.search(r"rotation of\s*([-+]?\d+(?:\.\d+)?)\s*degrees|rotate\s*:\s*([-+]?\d+)", stderr, re.IGNORECASE)
+    if rot_match:
+        rot_str = rot_match.group(1) or rot_match.group(2)
+        try:
+            rot_val = int(round(abs(float(rot_str)))) % 360
+            if rot_val in (90, 270):
+                width, height = height, width
+        except ValueError:
+            pass
+
     has_audio = "Audio:" in stderr
+    acodec = ""
+    if has_audio:
+        audio_match = re.search(r"Audio:\s*([a-zA-Z0-9_]+)", stderr)
+        if audio_match:
+            acodec = audio_match.group(1).lower()
 
     return {
         "duration": duration,
         "width": width,
         "height": height,
         "vcodec": vcodec,
+        "pix_fmt": pix_fmt,
         "has_audio": has_audio,
+        "acodec": acodec,
     }
 
 
@@ -72,113 +95,155 @@ def extract_video_thumbnail(video_path: Path) -> Optional[Path]:
     """
     ffmpeg_exe = _get_ffmpeg_exe()
     thumb_path = video_path.with_name(f"{video_path.stem}_thumb.jpg")
-    cmd = [
-        ffmpeg_exe,
-        "-y",
-        "-i", str(video_path),
-        "-ss", "00:00:00.100",
-        "-vframes", "1",
-        "-vf", "scale=320:-2",
-        "-q:v", "5",
-        str(thumb_path),
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-    if res.returncode == 0 and thumb_path.exists() and thumb_path.stat().st_size > 0:
-        return thumb_path
-
-    # Fallback para o frame 0 caso o vídeo seja muito curto (<0.1s)
-    cmd_fallback = [
-        ffmpeg_exe,
-        "-y",
-        "-i", str(video_path),
-        "-vframes", "1",
-        "-vf", "scale=320:-2",
-        "-q:v", "5",
-        str(thumb_path),
-    ]
-    res2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=20)
-    if res2.returncode == 0 and thumb_path.exists() and thumb_path.stat().st_size > 0:
-        return thumb_path
+    for seek in ("00:00:00.100", None):
+        cmd = [ffmpeg_exe, "-y"]
+        if seek:
+            cmd += ["-ss", seek]
+        cmd += [
+            "-i", str(video_path),
+            "-vframes", "1",
+            "-vf", "scale=320:-2",
+            "-q:v", "5",
+            str(thumb_path),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if res.returncode == 0 and thumb_path.exists() and thumb_path.stat().st_size > 0:
+            return thumb_path
 
     if thumb_path.exists():
         thumb_path.unlink(missing_ok=True)
     return None
 
 
-def prepare_story_video(video_path: Path, remove_audio: bool = False) -> Path:
+def prepare_story_video(
+    video_path: Path,
+    remove_audio: bool = False,
+    force_reencode: bool = False,
+    allow_reencode: bool = True,
+) -> Path:
     """
-    Normaliza qualquer vídeo (.mp4, .mov, HEVC, etc.) para o padrão oficial exigido
-    pelos Stories do Telegram (MP4, H.264 yuv420p, 720x1280, até 30fps, até 60s, faststart).
+    Prepara o vídeo para Stories do Telegram com baixíssimo consumo de memória (ideal para 512MB RAM):
 
-    Se remove_audio=True (ou se o vídeo não tiver áudio), injeta uma faixa AAC 100% silenciosa
-    para garantir som totalmente mudo sem acionar MEDIA_FILE_INVALID na API do Telegram.
+    - Fast Path (-c:v copy): Se já for H.264 8-bit dentro de 1080x1920 e <= 60s (ou quando
+      allow_reencode=False no upload HTTP), copia a trilha de vídeo sem recodificar (< 0.2s, ~12MB RAM),
+      removendo/silenciando o áudio ou mantendo AAC.
+    - Low-RAM Encode Path: Apenas quando force_reencode=True ou codec/dimensão incompatíveis
+      (ex: .mov HEVC do iPhone, 4K, >60s), recodifica em 720x1280 H.264 com -threads 1 e zerolatency.
     """
     ffmpeg_exe = _get_ffmpeg_exe()
     meta = inspect_video_metadata(video_path)
 
-    final_path = video_path.with_suffix(".mp4")
-    tmp_path = video_path.with_name(f"{video_path.stem}_tgstory.mp4")
-
-    vf_filter = (
-        "scale=720:1280:force_original_aspect_ratio=decrease,"
-        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,"
-        "setsar=1"
+    is_standard_h264 = (
+        meta["vcodec"] == "h264"
+        and (meta["pix_fmt"] == "" or ("yuv420p" in meta["pix_fmt"] and "10" not in meta["pix_fmt"]))
+        and meta["width"] <= 1080
+        and meta["height"] <= 1920
+        and meta["width"] % 2 == 0
+        and meta["height"] % 2 == 0
+        and meta["duration"] <= 60
     )
 
+    use_copy = (not force_reencode) and (is_standard_h264 or not allow_reencode)
     use_silent_audio = remove_audio or (not meta["has_audio"])
 
+    # No upload rápido (allow_reencode=False), preserva .mov se não for H.264 para não quebrar mux
+    target_suffix = ".mp4" if (is_standard_h264 or not use_copy) else video_path.suffix.lower()
+    final_path = video_path.with_suffix(target_suffix)
+    tmp_path = video_path.with_name(f"{video_path.stem}_tgstory{target_suffix}")
+
+    # Fast return se já está 100% pronto e não precisa tirar áudio nem converter contêiner
+    if (
+        use_copy
+        and not use_silent_audio
+        and (not allow_reencode or (video_path.suffix.lower() == ".mp4" and meta["acodec"] == "aac"))
+    ):
+        return video_path
+
     try:
-        if use_silent_audio:
-            # Descarta o áudio original e adiciona uma trilha AAC digitalmente muda (0 dB silêncio absoluto)
-            cmd = [
-                ffmpeg_exe,
-                "-y",
-                "-i", str(video_path),
-                "-f", "lavfi",
-                "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-vf", vf_filter,
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "23",
-                "-pix_fmt", "yuv420p",
-                "-profile:v", "main",
-                "-level", "4.0",
-                "-r", "30",
-                "-t", "60",
-                "-threads", "2",
-                "-c:a", "aac",
-                "-b:a", "32k",
-                "-shortest",
-                "-movflags", "+faststart",
-                str(tmp_path),
-            ]
+        if use_copy:
+            # Cópia direta da faixa de vídeo (instantâneo e ~12MB RAM)
+            if use_silent_audio:
+                cmd = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(video_path),
+                    "-f", "lavfi",
+                    "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-b:a", "32k",
+                    "-shortest",
+                    "-movflags", "+faststart",
+                    str(tmp_path),
+                ]
+            else:
+                audio_codec_args = ["-c:a", "copy"] if meta["acodec"] == "aac" else ["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "44100"]
+                cmd = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(video_path),
+                    "-map", "0:v:0",
+                    "-map", "0:a:0",
+                    "-c:v", "copy",
+                    *audio_codec_args,
+                    "-movflags", "+faststart",
+                    str(tmp_path),
+                ]
         else:
-            # Mantém o áudio original recodificado para AAC padrão do Telegram
-            cmd = [
-                ffmpeg_exe,
-                "-y",
-                "-i", str(video_path),
-                "-map", "0:v:0",
-                "-map", "0:a:0",
+            # Recodificação segura com consumo mínimo de memória para servidores 512MB RAM
+            vf_filter = (
+                "scale=720:1280:force_original_aspect_ratio=decrease,"
+                "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,"
+                "setsar=1"
+            )
+            encode_video_args = [
                 "-vf", vf_filter,
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
-                "-crf", "23",
+                "-tune", "zerolatency",
+                "-crf", "24",
+                "-x264-params", "rc-lookahead=5:ref=1:bframes=0",
                 "-pix_fmt", "yuv420p",
                 "-profile:v", "main",
                 "-level", "4.0",
                 "-r", "30",
+                "-g", "30",
                 "-t", "60",
-                "-threads", "2",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-ac", "2",
-                "-ar", "44100",
-                "-movflags", "+faststart",
-                str(tmp_path),
+                "-threads", "1",
             ]
+            if use_silent_audio:
+                cmd = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(video_path),
+                    "-f", "lavfi",
+                    "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    *encode_video_args,
+                    "-c:a", "aac",
+                    "-b:a", "32k",
+                    "-shortest",
+                    "-movflags", "+faststart",
+                    str(tmp_path),
+                ]
+            else:
+                cmd = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(video_path),
+                    "-map", "0:v:0",
+                    "-map", "0:a:0",
+                    *encode_video_args,
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-ac", "2",
+                    "-ar", "44100",
+                    "-movflags", "+faststart",
+                    str(tmp_path),
+                ]
 
         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
         if res.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size == 0:

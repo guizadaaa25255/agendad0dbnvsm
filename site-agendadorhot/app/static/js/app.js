@@ -847,10 +847,16 @@ async function handleScheduleSubmit(e) {
       method: 'POST',
       body: formData
     });
-    const data = await res.json();
+    const rawText = await res.text();
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (parseErr) {
+      data = {};
+    }
 
     if (!res.ok) {
-      throw new Error(data.detail || 'Falha ao agendar story.');
+      throw new Error(data.detail || `Erro no servidor (${res.status}). Tente novamente em alguns segundos.`);
     }
 
     showToast('Story agendado com sucesso! Será publicado automaticamente.', 'success');

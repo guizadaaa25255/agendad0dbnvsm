@@ -336,6 +336,58 @@ async def toggle_story_pinned_on_telegram(db: Session, story: ScheduledStory, pi
         await client.disconnect()
 
 
+async def _build_uploaded_video_media(
+    client: TelegramClient,
+    media_path_obj: Path,
+    db: Session,
+    story: ScheduledStory,
+    force_reencode: bool = False,
+) -> InputMediaUploadedDocument:
+    """Normaliza (se necessário), extrai thumbnail e envia vídeo para upload no Telegram."""
+    meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
+    needs_normalize = force_reencode or (
+        media_path_obj.suffix.lower() != ".mp4"
+        or meta["vcodec"] != "h264"
+        or not meta["has_audio"]
+        or meta["duration"] > 60
+        or meta["width"] > 1080
+        or meta["height"] > 1920
+    )
+    if needs_normalize:
+        media_path_obj = await asyncio.to_thread(
+            prepare_story_video,
+            media_path_obj,
+            remove_audio=False,
+            force_reencode=force_reencode,
+        )
+        story.media_path = str(media_path_obj)
+        db.commit()
+        meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
+
+    thumb_path: Optional[Path] = None
+    try:
+        thumb_path = await asyncio.to_thread(extract_video_thumbnail, media_path_obj)
+        uploaded_file = await client.upload_file(str(media_path_obj))
+        uploaded_thumb = await client.upload_file(str(thumb_path)) if thumb_path else None
+    finally:
+        if thumb_path and thumb_path.exists():
+            thumb_path.unlink(missing_ok=True)
+
+    return InputMediaUploadedDocument(
+        file=uploaded_file,
+        thumb=uploaded_thumb,
+        mime_type="video/mp4",
+        attributes=[
+            DocumentAttributeVideo(
+                duration=float(meta["duration"]),
+                w=int(meta["width"]),
+                h=int(meta["height"]),
+                supports_streaming=True,
+            )
+        ],
+    )
+
+
 async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
     """Publica o story via MTProto (stories.SendStoryRequest) na conta escolhida no agendamento."""
     account = get_account(db, story.account_id)
@@ -358,52 +410,14 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
         await asyncio.sleep(round(random.uniform(1.3, 3.1) + random.uniform(0.08, 0.42), 3))
 
         media_path_obj = Path(story.media_path)
-        thumb_path: Optional[Path] = None
 
-        try:
-            if story.media_type == "photo":
-                uploaded_file = await client.upload_file(str(media_path_obj))
-                media = InputMediaUploadedPhoto(file=uploaded_file)
-            elif story.media_type == "video":
-                meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
-                needs_normalize = (
-                    media_path_obj.suffix.lower() != ".mp4"
-                    or meta["width"] != 720
-                    or meta["height"] != 1280
-                    or meta["vcodec"] != "h264"
-                    or not meta["has_audio"]
-                    or meta["duration"] > 60
-                )
-                if needs_normalize:
-                    media_path_obj = await asyncio.to_thread(
-                        prepare_story_video, media_path_obj, remove_audio=False
-                    )
-                    story.media_path = str(media_path_obj)
-                    db.commit()
-                    meta = await asyncio.to_thread(inspect_video_metadata, media_path_obj)
-
-                thumb_path = await asyncio.to_thread(extract_video_thumbnail, media_path_obj)
-                uploaded_file = await client.upload_file(str(media_path_obj))
-                uploaded_thumb = await client.upload_file(str(thumb_path)) if thumb_path else None
-
-                media = InputMediaUploadedDocument(
-                    file=uploaded_file,
-                    thumb=uploaded_thumb,
-                    mime_type="video/mp4",
-                    attributes=[
-                        DocumentAttributeVideo(
-                            duration=float(meta["duration"]),
-                            w=int(meta["width"]),
-                            h=int(meta["height"]),
-                            supports_streaming=True,
-                        )
-                    ],
-                )
-            else:
-                raise ValueError(f"Tipo de mídia não suportado: {story.media_type}")
-        finally:
-            if thumb_path and thumb_path.exists():
-                thumb_path.unlink(missing_ok=True)
+        if story.media_type == "photo":
+            uploaded_file = await client.upload_file(str(media_path_obj))
+            media = InputMediaUploadedPhoto(file=uploaded_file)
+        elif story.media_type == "video":
+            media = await _build_uploaded_video_media(client, media_path_obj, db, story, force_reencode=False)
+        else:
+            raise ValueError(f"Tipo de mídia não suportado: {story.media_type}")
 
         if story.privacy == "contacts":
             privacy_rules = [InputPrivacyValueAllowContacts()]
@@ -445,11 +459,28 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
                 raise RuntimeError(f"Telegram FloodWait: aguarde {e.seconds} segundos antes de tentar novamente.")
         except Exception as e:
             err_str = str(e)
-            if "PREMIUM" in err_str.upper() or "STORY_PERIOD_INVALID" in err_str:
+            if "MEDIA_FILE_INVALID" in err_str.upper() and story.media_type == "video":
+                # Fallback automático: recodifica estritamente em 720x1280 H.264 keyframe=1s e reenvia
+                media = await _build_uploaded_video_media(
+                    client, Path(story.media_path), db, story, force_reencode=True
+                )
+                request = SendStoryRequest(
+                    peer=InputPeerSelf(),
+                    media=media,
+                    privacy_rules=privacy_rules,
+                    pinned=bool(story.pinned),
+                    caption=caption_text,
+                    entities=caption_entities if caption_entities else None,
+                    period=story.period,
+                    random_id=random.getrandbits(63)
+                )
+                updates = await client(request)
+            elif "PREMIUM" in err_str.upper() or "STORY_PERIOD_INVALID" in err_str:
                 raise RuntimeError(
                     "A duração selecionada (48h) ou recurso específico requer uma assinatura Telegram Premium ativa na conta."
                 )
-            raise RuntimeError(f"Erro na API do Telegram: {err_str}")
+            else:
+                raise RuntimeError(f"Erro na API do Telegram: {err_str}")
 
         story_id = None
         if hasattr(updates, "updates"):

@@ -185,7 +185,9 @@ async def create_story(
     audio_removed = False
     if media_type == "video":
         try:
-            dest_path = await asyncio.to_thread(prepare_story_video, dest_path, remove_audio=remove_audio)
+            dest_path = await asyncio.to_thread(
+                prepare_story_video, dest_path, remove_audio=remove_audio, allow_reencode=False
+            )
             audio_removed = bool(remove_audio)
         except Exception as exc:
             if dest_path.exists():
