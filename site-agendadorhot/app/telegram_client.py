@@ -198,10 +198,13 @@ async def _finalize_account_connection(login_data: Dict[str, Any], db: Session, 
         db.refresh(account)
         _PENDING_LOGINS.pop(session_token, None)
 
-        # Baixa a foto de perfil da conta logo na conexão
+        # Baixa a foto de perfil da conta logo na conexão e salva no banco
         try:
             avatar_dest = get_avatar_path(account.id)
-            await client.download_profile_photo(me, file=str(avatar_dest))
+            downloaded = await client.download_profile_photo(me, file=str(avatar_dest))
+            if downloaded and Path(downloaded).exists():
+                account.avatar_data = Path(downloaded).read_bytes()
+                db.commit()
         except Exception:
             pass
 
@@ -229,7 +232,7 @@ def get_avatar_path(account_id: int) -> Path:
 
 async def fetch_or_get_account_avatar(db: Session, account_id: int) -> Optional[Path]:
     """
-    Retorna a foto de perfil da conta salva em cache ou busca direto no Telegram se ainda não existir.
+    Retorna a foto de perfil da conta salva em cache/banco ou busca direto no Telegram se ainda não existir.
     """
     account = get_account(db, account_id)
     if not account:
@@ -240,6 +243,12 @@ async def fetch_or_get_account_avatar(db: Session, account_id: int) -> Optional[
         age_sec = time.time() - avatar_path.stat().st_mtime
         if age_sec < _AVATAR_CACHE_TTL_SEC:
             return avatar_path
+
+    # Restaura do banco (PostgreSQL) sem precisar abrir conexão MTProto
+    if getattr(account, "avatar_data", None):
+        avatar_path.parent.mkdir(parents=True, exist_ok=True)
+        avatar_path.write_bytes(account.avatar_data)
+        return avatar_path
 
     if not account.encrypted_session:
         return avatar_path if avatar_path.exists() else None
@@ -261,6 +270,8 @@ async def fetch_or_get_account_avatar(db: Session, account_id: int) -> Optional[
                 if await client.is_user_authorized():
                     downloaded = await client.download_profile_photo("me", file=str(avatar_path))
                     if downloaded and Path(downloaded).exists():
+                        account.avatar_data = Path(downloaded).read_bytes()
+                        db.commit()
                         return Path(downloaded)
             finally:
                 await client.disconnect()
@@ -307,6 +318,7 @@ async def disconnect_telegram_account(db: Session, account_id: int) -> bool:
     account.encrypted_session = ""
     account.encrypted_api_id = None
     account.encrypted_api_hash = None
+    account.avatar_data = None
     account.updated_at = datetime.now(timezone.utc)
     db.commit()
     try:

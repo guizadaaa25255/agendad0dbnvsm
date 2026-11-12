@@ -41,7 +41,11 @@ def _migrate():
     insp = inspect(engine)
     binary_type = "BLOB" if is_sqlite else "BYTEA"
     wanted = {
-        "telegram_accounts": [("encrypted_api_id", "TEXT"), ("encrypted_api_hash", "TEXT")],
+        "telegram_accounts": [
+            ("encrypted_api_id", "TEXT"),
+            ("encrypted_api_hash", "TEXT"),
+            ("avatar_data", binary_type),
+        ],
         "scheduled_stories": [("account_id", "INTEGER"), ("media_data", binary_type)],
     }
     with engine.begin() as conn:

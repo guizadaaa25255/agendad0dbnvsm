@@ -36,6 +36,7 @@ class TelegramAccount(Base):
     encrypted_api_id = Column(Text, nullable=True)
     encrypted_api_hash = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    avatar_data = Column(LargeBinary, nullable=True)  # Foto de perfil salva para sobreviver a reinícios na nuvem
     connected_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
