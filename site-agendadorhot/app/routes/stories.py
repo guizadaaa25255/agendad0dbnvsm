@@ -16,7 +16,7 @@ from fastapi import (
     Query,
     status
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import (
     UPLOAD_DIR,
@@ -37,7 +37,7 @@ VALID_PERIODS = {21600: 6, 43200: 12, 86400: 24, 172800: 48}
 VALID_PRIVACIES = {"all", "contacts", "close_friends"}
 
 
-def _serialize_story(story: ScheduledStory, db: Session = None) -> dict:
+def _serialize_story(story: ScheduledStory, db: Session = None, accounts_map: dict = None) -> dict:
     """Formata o story para a resposta da API com URLs e datas legíveis."""
     filename = Path(story.media_path).name
     media_url = f"/media/{filename}"
@@ -67,10 +67,13 @@ def _serialize_story(story: ScheduledStory, db: Session = None) -> dict:
             })
 
     account_label = None
-    if db is not None and story.account_id:
-        acc = db.query(TelegramAccount).filter(TelegramAccount.id == story.account_id).first()
-        if acc:
-            account_label = f"{acc.first_name or acc.username or ''} ({acc.phone})".strip()
+    if story.account_id:
+        if accounts_map is not None:
+            account_label = accounts_map.get(story.account_id)
+        elif db is not None:
+            acc = db.query(TelegramAccount).filter(TelegramAccount.id == story.account_id).first()
+            if acc:
+                account_label = f"{acc.first_name or acc.username or ''} ({acc.phone})".strip()
 
     return {
         "id": story.id,
@@ -240,7 +243,7 @@ def list_stories(
     db: Session = Depends(get_db)
 ):
     """Lista todos os stories cadastrados, ordenados por data."""
-    query = db.query(ScheduledStory)
+    query = db.query(ScheduledStory).options(selectinload(ScheduledStory.logs))
 
     if account_id is not None:
         query = query.filter(ScheduledStory.account_id == account_id)
@@ -249,7 +252,17 @@ def list_stories(
         query = query.filter(ScheduledStory.status == status_filter.upper())
 
     stories = query.order_by(ScheduledStory.scheduled_time.desc()).all()
-    return [_serialize_story(s, db) for s in stories]
+
+    accounts_map = {
+        row.id: f"{row.first_name or row.username or ''} ({row.phone})".strip()
+        for row in db.query(
+            TelegramAccount.id,
+            TelegramAccount.first_name,
+            TelegramAccount.username,
+            TelegramAccount.phone
+        ).all()
+    }
+    return [_serialize_story(s, db, accounts_map=accounts_map) for s in stories]
 
 
 @router.get("/{story_id}", response_model=StoryResponse)

@@ -427,6 +427,8 @@ document.addEventListener('click', (e) => {
   }
 });
 
+const storiesCacheByAccount = {};
+
 function switchActiveAccount(accId, event) {
   if (event) event.stopPropagation();
   currentSelectedAccountId = accId;
@@ -434,6 +436,16 @@ function switchActiveAccount(accId, event) {
   if (select) select.value = String(accId);
   renderAccountsHeader();
   closeAccountsMenu();
+
+  // Mostra instantaneamente do cache local (0ms) sem esperar a rede
+  if (Object.prototype.hasOwnProperty.call(storiesCacheByAccount, accId)) {
+    allStories = storiesCacheByAccount[accId];
+  } else {
+    allStories = [];
+  }
+  updateCounts();
+  renderStoriesFeed();
+
   const acc = savedAccountsList.find(a => a.id === accId);
   if (acc) {
     try {
@@ -445,7 +457,7 @@ function switchActiveAccount(accId, event) {
     } catch (e) {}
     showToast(`Conta ativa alterada para: ${acc.first_name || acc.username || acc.phone}`, 'info');
   }
-  loadStories();
+  loadStories(true);
 }
 
 function renderAvatarHtml(acc) {
@@ -607,6 +619,7 @@ async function checkAccountStatus(preferredAccountId = null) {
 
     renderAccountsHeader();
     loadStories();
+    preloadAllStoriesCache();
   } catch (err) {
     loading.classList.add('hidden');
   }
@@ -902,14 +915,23 @@ async function handleScheduleSubmit(e) {
 // Listagem e Painel de Stories
 // ==========================================================================
 async function loadStories(isBackground = false) {
+  const requestedAccountId = currentSelectedAccountId;
   try {
-    const url = currentSelectedAccountId 
-      ? `/api/stories?account_id=${currentSelectedAccountId}` 
+    const url = requestedAccountId
+      ? `/api/stories?account_id=${requestedAccountId}`
       : '/api/stories';
     const res = await fetch(url);
     if (!res.ok) return;
 
-    allStories = await safeJson(res);
+    const fetched = await safeJson(res);
+    if (requestedAccountId) {
+      storiesCacheByAccount[requestedAccountId] = fetched;
+    }
+
+    // Evita sobrescrever a tela se o usuário trocou de conta enquanto carregava
+    if (requestedAccountId !== currentSelectedAccountId) return;
+
+    allStories = fetched;
     updateCounts();
     renderStoriesFeed();
   } catch (err) {
@@ -917,6 +939,30 @@ async function loadStories(isBackground = false) {
       console.error('Erro ao carregar stories:', err);
     }
   }
+}
+
+async function preloadAllStoriesCache() {
+  try {
+    const res = await fetch('/api/stories');
+    if (!res.ok) return;
+    const everyStory = await safeJson(res);
+    savedAccountsList.forEach(a => {
+      if (!Object.prototype.hasOwnProperty.call(storiesCacheByAccount, a.id)) {
+        storiesCacheByAccount[a.id] = [];
+      }
+    });
+    const grouped = {};
+    savedAccountsList.forEach(a => { grouped[a.id] = []; });
+    everyStory.forEach(s => {
+      if (s.account_id) {
+        if (!grouped[s.account_id]) grouped[s.account_id] = [];
+        grouped[s.account_id].push(s);
+      }
+    });
+    Object.keys(grouped).forEach(k => {
+      storiesCacheByAccount[Number(k)] = grouped[k];
+    });
+  } catch (e) {}
 }
 
 function updateCounts() {

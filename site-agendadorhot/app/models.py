@@ -10,7 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     LargeBinary
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from app.database import Base
 
 
@@ -36,7 +36,7 @@ class TelegramAccount(Base):
     encrypted_api_id = Column(Text, nullable=True)
     encrypted_api_hash = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    avatar_data = Column(LargeBinary, nullable=True)  # Foto de perfil salva para sobreviver a reinícios na nuvem
+    avatar_data = deferred(Column(LargeBinary, nullable=True))  # Carregado sob demanda para nunca atrasar listagens
     connected_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -51,7 +51,7 @@ class ScheduledStory(Base):
     account_id = Column(Integer, nullable=True, index=True)  # conta que vai publicar
     media_path = Column(String(512), nullable=False)
     media_type = Column(String(16), nullable=False)  # 'photo' ou 'video'
-    media_data = Column(LargeBinary, nullable=True)  # Cópia binária para sobreviver a reinícios na nuvem
+    media_data = deferred(Column(LargeBinary, nullable=True))  # Carregado sob demanda para nunca atrasar listagens
     caption = Column(Text, nullable=True)
     scheduled_time = Column(DateTime, nullable=False, index=True)
     period = Column(Integer, nullable=False, default=86400)  # 21600 (6h), 43200 (12h), 86400 (24h), 172800 (48h)
