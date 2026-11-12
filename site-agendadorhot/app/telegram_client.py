@@ -403,6 +403,11 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
         if not await client.is_user_authorized():
             raise RuntimeError("A sessão do Telegram expirou ou foi revogada. Conecte sua conta novamente.")
 
+        if not os.path.exists(story.media_path) and getattr(story, "media_data", None):
+            media_restore_path = Path(story.media_path)
+            media_restore_path.parent.mkdir(parents=True, exist_ok=True)
+            media_restore_path.write_bytes(story.media_data)
+
         if not os.path.exists(story.media_path):
             raise FileNotFoundError(f"Arquivo de mídia não encontrado: {story.media_path}")
 

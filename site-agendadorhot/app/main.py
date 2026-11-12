@@ -4,7 +4,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,7 +94,33 @@ app.include_router(fonts.router)
 # Diretórios estáticos e de mídia
 STATIC_DIR = BASE_DIR / "app" / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.mount("/media", StaticFiles(directory=str(UPLOAD_DIR)), name="media")
+
+
+@app.get("/media/{filename}")
+def serve_media(filename: str):
+    """Serve mídia do disco ou restaura automaticamente do banco caso o disco da nuvem reinicie."""
+    safe_name = Path(filename).name
+    file_path = UPLOAD_DIR / safe_name
+
+    if not file_path.exists():
+        from app.database import SessionLocal
+        from app.models import ScheduledStory
+        db = SessionLocal()
+        try:
+            story = (
+                db.query(ScheduledStory)
+                .filter(ScheduledStory.media_path.endswith(safe_name))
+                .first()
+            )
+            if story and story.media_data:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_bytes(story.media_data)
+        finally:
+            db.close()
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    return FileResponse(str(file_path))
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])

@@ -197,11 +197,13 @@ async def create_story(
                 detail=f"Não foi possível processar o vídeo para o Telegram: {exc}"
             )
 
-    # 6. Registra no banco de dados SQLite
+    # 6. Registra no banco de dados (incluindo backup binário da mídia para nuvem)
+    media_bytes = dest_path.read_bytes() if dest_path.exists() else None
     story = ScheduledStory(
         account_id=account_id,
         media_path=str(dest_path),
         media_type=media_type,
+        media_data=media_bytes,
         caption=caption.strip() if caption else None,
         scheduled_time=scheduled_dt_fortaleza,
         period=period,

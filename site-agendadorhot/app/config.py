@@ -29,8 +29,11 @@ if not ENCRYPTION_KEY:
     from cryptography.fernet import Fernet
     ENCRYPTION_KEY = Fernet.generate_key().decode()
 
-# Configurações do Banco de Dados SQLite
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'scheduler.db'}")
+# Configurações do Banco de Dados (SQLite local ou PostgreSQL na nuvem)
+_raw_db_url = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'scheduler.db'}").strip()
+if _raw_db_url.startswith("postgres://"):
+    _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
+DATABASE_URL = _raw_db_url
 
 # Fuso horário padrão do sistema (America/Fortaleza)
 TIMEZONE_STR = os.getenv("TIMEZONE", "America/Fortaleza")

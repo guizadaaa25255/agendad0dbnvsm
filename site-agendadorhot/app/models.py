@@ -7,7 +7,8 @@ from sqlalchemy import (
     Text,
     Boolean,
     DateTime,
-    ForeignKey
+    ForeignKey,
+    LargeBinary
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -49,6 +50,7 @@ class ScheduledStory(Base):
     account_id = Column(Integer, nullable=True, index=True)  # conta que vai publicar
     media_path = Column(String(512), nullable=False)
     media_type = Column(String(16), nullable=False)  # 'photo' ou 'video'
+    media_data = Column(LargeBinary, nullable=True)  # Cópia binária para sobreviver a reinícios na nuvem
     caption = Column(Text, nullable=True)
     scheduled_time = Column(DateTime, nullable=False, index=True)
     period = Column(Integer, nullable=False, default=86400)  # 21600 (6h), 43200 (12h), 86400 (24h), 172800 (48h)

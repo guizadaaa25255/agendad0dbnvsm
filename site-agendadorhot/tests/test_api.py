@@ -191,3 +191,41 @@ def test_account_avatar_url_and_endpoint(account_id):
         assert ok_res.content == b"\xff\xd8\xff\xe0fake-jpeg-data"
     finally:
         avatar_file.unlink(missing_ok=True)
+
+
+def test_media_restores_from_db_when_disk_wiped(account_id):
+    from pathlib import Path
+    from app.config import UPLOAD_DIR
+
+    future_time = datetime.now(APP_TIMEZONE) + timedelta(minutes=20)
+    payload_bytes = b"fake-jpeg-cloud-persistence-test"
+
+    res = client.post(
+        "/api/stories",
+        data={
+            "account_id": account_id,
+            "scheduled_time": future_time.strftime("%Y-%m-%dT%H:%M"),
+            "period": 172800,
+            "pinned": True,
+            "privacy": "all",
+        },
+        files={"file": ("persist.jpg", io.BytesIO(payload_bytes), "image/jpeg")},
+    )
+    assert res.status_code == 201
+    story_data = res.json()
+    media_url = story_data["media_url"]
+    disk_path = UPLOAD_DIR / Path(media_url).name
+    assert disk_path.exists()
+
+    # Simula reinício do disco efêmero na nuvem apagando o arquivo do disco
+    disk_path.unlink()
+    assert not disk_path.exists()
+
+    # Ao requisitar /media/..., deve restaurar automaticamente do banco e servir 200
+    media_res = client.get(media_url)
+    assert media_res.status_code == 200
+    assert media_res.content == payload_bytes
+    assert disk_path.exists()
+
+    # Limpeza
+    client.delete(f"/api/stories/{story_data['id']}")
