@@ -29,7 +29,7 @@ async def check_status(db: Session = Depends(get_db)):
         AccountItem(
             id=a.id, phone=a.phone, first_name=a.first_name, username=a.username,
             is_premium=bool(a.is_premium), connected_at=a.connected_at,
-            avatar_url=f"/api/auth/avatar/{a.id}"
+            avatar_url=f"/api/auth/avatar/{a.id}?v={int(a.updated_at.timestamp()) if a.updated_at else 1}"
         )
         for a in list_active_accounts(db)
     ]

@@ -174,7 +174,7 @@ def test_account_avatar_url_and_endpoint(account_id):
     assert status_res.status_code == 200
     accounts = status_res.json()["accounts"]
     acc = next(a for a in accounts if a["id"] == account_id)
-    assert acc["avatar_url"] == f"/api/auth/avatar/{account_id}"
+    assert acc["avatar_url"].startswith(f"/api/auth/avatar/{account_id}")
 
     avatar_file = get_avatar_path(account_id)
     avatar_file.unlink(missing_ok=True)
