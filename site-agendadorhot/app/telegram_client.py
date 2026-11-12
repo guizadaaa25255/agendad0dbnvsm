@@ -340,7 +340,12 @@ async def toggle_story_pinned_on_telegram(db: Session, story: ScheduledStory, pi
     cid, chash = account_credentials(account)
     client = TelegramClient(StringSession(session_str), cid, chash)
 
-    await client.connect()
+    try:
+        await client.connect()
+    except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError):
+        raise RuntimeError(
+            "A sessão desta conta expirou ou foi desconectada pelo Telegram. Remova e conecte a conta novamente."
+        )
     try:
         await client(TogglePinnedRequest(peer=InputPeerSelf(), id=[story.telegram_story_id], pinned=pinned))
         return True
@@ -410,7 +415,12 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
     cid, chash = account_credentials(account)
     client = TelegramClient(StringSession(session_str), cid, chash)
 
-    await client.connect()
+    try:
+        await client.connect()
+    except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError):
+        raise RuntimeError(
+            "A sessão desta conta expirou ou foi desconectada pelo Telegram. Remova e conecte a conta novamente."
+        )
     try:
         if not await client.is_user_authorized():
             raise RuntimeError("A sessão do Telegram expirou ou foi revogada. Conecte sua conta novamente.")

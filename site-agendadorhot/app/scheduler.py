@@ -151,11 +151,18 @@ def reload_pending_jobs():
     """
     db: Session = SessionLocal()
     try:
-        pending_stories = db.query(ScheduledStory).filter(ScheduledStory.status == "SCHEDULED").all()
+        pending_stories = (
+            db.query(ScheduledStory)
+            .filter(ScheduledStory.status.in_(["SCHEDULED", "PUBLISHING"]))
+            .all()
+        )
         now_fortaleza = datetime.now(APP_TIMEZONE)
         count = 0
 
         for story in pending_stories:
+            if story.status == "PUBLISHING":
+                story.status = "SCHEDULED"
+                db.commit()
             run_time = story.scheduled_time
             if run_time.tzinfo is None:
                 run_time = run_time.replace(tzinfo=APP_TIMEZONE)

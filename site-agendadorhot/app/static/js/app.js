@@ -1,4 +1,13 @@
 
+async function safeJson(res) {
+  const rawText = await res.text();
+  try {
+    return rawText ? JSON.parse(rawText) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
 // ==========================================================================
 // Gerador Interativo de Legendas com IA
 // ==========================================================================
@@ -64,7 +73,7 @@ async function generateAiCaptions() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.detail || 'Falha ao gerar legendas.');
 
     lastGeneratedCaptions = data.captions || [];
@@ -147,7 +156,7 @@ function confirmGridChoice(choice) {
 async function toggleGridStory(id) {
   try {
     const res = await fetch(`/api/stories/${id}/toggle-grid`, { method: 'POST' });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.detail || 'Falha ao alterar grade.');
     showToast(data.pinned ? 'Story adicionado à grade do perfil!' : 'Story removido da grade do perfil.', 'success');
     loadStories();
@@ -530,7 +539,7 @@ async function checkAccountStatus(preferredAccountId = null) {
 
   try {
     const res = await fetch('/api/auth/status');
-    const data = await res.json();
+    const data = await safeJson(res);
     loading.classList.add('hidden');
 
     savedAccountsList = data.accounts || [];
@@ -659,7 +668,7 @@ async function handleSendCode() {
         api_hash: document.getElementById('apiHashInput').value.trim() || null
       })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
 
     if (!res.ok) {
       throw new Error(data.detail || 'Falha ao solicitar código.');
@@ -699,7 +708,7 @@ async function handleVerifyCode() {
         code: code
       })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
 
     if (!res.ok) {
       throw new Error(data.detail || 'Código inválido.');
@@ -743,7 +752,7 @@ async function handleVerify2FA() {
         password: password
       })
     });
-    const data = await res.json();
+    const data = await safeJson(res);
 
     if (!res.ok) {
       throw new Error(data.detail || 'Senha 2FA incorreta.');
@@ -891,7 +900,7 @@ async function loadStories(isBackground = false) {
     const res = await fetch(url);
     if (!res.ok) return;
 
-    allStories = await res.json();
+    allStories = await safeJson(res);
     updateCounts();
     renderStoriesFeed();
   } catch (err) {
@@ -1126,7 +1135,7 @@ async function handleEditSubmit(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
+    const data = await safeJson(res);
 
     if (!res.ok) {
       throw new Error(data.detail || 'Falha ao atualizar agendamento.');
@@ -1154,7 +1163,7 @@ async function openLogsModal(storyId) {
 
   try {
     const res = await fetch(`/api/stories/${storyId}/logs`);
-    const logs = await res.json();
+    const logs = await safeJson(res);
 
     if (!logs || logs.length === 0) {
       container.innerHTML = '<p class="helper-text">Nenhum log registrado ainda para este story.</p>';
@@ -1333,7 +1342,7 @@ async function apply3DFontToCaption() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.detail || 'Falha ao formatar letras.');
 
     // Salva o título 3D no estado para envio limpo sem poluir o textarea
