@@ -126,12 +126,28 @@ def serve_media(filename: str):
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     """Endpoint de verificação de integridade e hora atual no fuso de Fortaleza."""
+    from sqlalchemy import text
+    from app.database import SessionLocal
+
     now_fortaleza = datetime.now(APP_TIMEZONE)
+    db_ok = True
+    db_error = None
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        db_ok = False
+        db_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+    finally:
+        db.close()
+
     return {
-        "status": "healthy",
+        "status": "healthy" if db_ok else "degraded",
         "timezone": TIMEZONE_STR,
         "current_time": now_fortaleza.strftime("%Y-%m-%d %H:%M:%S"),
-        "scheduler_running": scheduler.running
+        "scheduler_running": scheduler.running,
+        "db_ok": db_ok,
+        "db_error": db_error,
     }
 
 

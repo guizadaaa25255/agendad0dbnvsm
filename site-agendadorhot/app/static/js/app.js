@@ -538,7 +538,16 @@ async function checkAccountStatus(preferredAccountId = null) {
   const select = document.getElementById('accountSelect');
 
   try {
-    const res = await fetch('/api/auth/status');
+    let res = await fetch('/api/auth/status');
+    if (!res.ok) {
+      await new Promise(r => setTimeout(r, 1500));
+      res = await fetch('/api/auth/status');
+    }
+    if (!res.ok) {
+      loading.classList.add('hidden');
+      showToast('Servidor reiniciando ou banco indisponível no momento. Tente atualizar em alguns segundos.', 'error');
+      return;
+    }
     const data = await safeJson(res);
     loading.classList.add('hidden');
 

@@ -4,12 +4,19 @@ from app.config import DATABASE_URL, BASE_DIR
 
 # Configura engine para SQLite local ou PostgreSQL na nuvem
 is_sqlite = "sqlite" in DATABASE_URL
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if is_sqlite else {},
-    pool_pre_ping=not is_sqlite,
-    echo=False,
-)
+engine_kwargs = {
+    "echo": False,
+}
+if is_sqlite:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs["connect_args"] = {"connect_timeout": 10}
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_recycle"] = 180
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 5
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 # expire_on_commit=False evita DetachedInstanceError ao acessar atributos após commit
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
@@ -22,6 +29,9 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
