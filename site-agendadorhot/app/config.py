@@ -32,7 +32,9 @@ if not ENCRYPTION_KEY:
 # Configurações do Banco de Dados (SQLite local ou PostgreSQL na nuvem)
 _raw_db_url = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'scheduler.db'}").strip()
 if _raw_db_url.startswith("postgres://"):
-    _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
+    _raw_db_url = _raw_db_url.replace("postgres://", "postgresql+psycopg://", 1)
+elif _raw_db_url.startswith("postgresql://"):
+    _raw_db_url = _raw_db_url.replace("postgresql://", "postgresql+psycopg://", 1)
 DATABASE_URL = _raw_db_url
 
 # Fuso horário padrão do sistema (America/Fortaleza)
