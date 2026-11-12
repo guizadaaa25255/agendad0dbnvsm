@@ -28,6 +28,7 @@ from app.media_utils import (
     inspect_video_metadata,
     extract_video_thumbnail,
     prepare_story_video,
+    prepare_story_photo,
 )
 
 
@@ -439,6 +440,10 @@ async def publish_story_to_telegram(db: Session, story: ScheduledStory) -> int:
         media_path_obj = Path(story.media_path)
 
         if story.media_type == "photo":
+            media_path_obj = await asyncio.to_thread(prepare_story_photo, media_path_obj)
+            if str(media_path_obj) != story.media_path:
+                story.media_path = str(media_path_obj)
+                db.commit()
             uploaded_file = await client.upload_file(str(media_path_obj))
             media = InputMediaUploadedPhoto(file=uploaded_file)
         elif story.media_type == "video":

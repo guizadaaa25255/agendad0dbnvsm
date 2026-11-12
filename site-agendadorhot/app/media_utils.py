@@ -263,3 +263,49 @@ def prepare_story_video(
 def strip_video_audio(video_path: Path) -> Path:
     """Remove a faixa de áudio do vídeo mantendo compatibilidade total com Stories do Telegram."""
     return prepare_story_video(video_path, remove_audio=True)
+
+
+def prepare_story_photo(photo_path: Path) -> Path:
+    """
+    Normaliza fotos (PNG/RGBA/WEBP/HEIC/JPEG grande) para RGB JPEG <= 1080x1920,
+    evitando erro MEDIA_FILE_INVALID no Telegram Stories (ex: PNGs >10MB ou com transparência).
+    """
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+    except ImportError:
+        return photo_path
+
+    try:
+        with Image.open(photo_path) as im:
+            im = ImageOps.exif_transpose(im)
+            needs_convert = (
+                photo_path.suffix.lower() not in (".jpg", ".jpeg")
+                or im.mode != "RGB"
+                or im.width > 1080
+                or im.height > 1920
+                or photo_path.stat().st_size > 4 * 1024 * 1024
+            )
+            if not needs_convert:
+                return photo_path
+
+            if im.mode in ("RGBA", "LA", "P"):
+                bg = Image.new("RGB", im.size, (0, 0, 0))
+                alpha = im.convert("RGBA").split()[-1]
+                bg.paste(im.convert("RGBA"), mask=alpha)
+                im = bg
+            elif im.mode != "RGB":
+                im = im.convert("RGB")
+
+            if im.width > 1080 or im.height > 1920:
+                im.thumbnail((1080, 1920), Image.Resampling.LANCZOS)
+
+            final_path = photo_path.with_suffix(".jpg")
+            tmp_path = photo_path.with_name(f"{photo_path.stem}_tgphoto.jpg")
+            im.save(tmp_path, format="JPEG", quality=90, optimize=True)
+    except (UnidentifiedImageError, OSError):
+        return photo_path
+
+    os.replace(tmp_path, final_path)
+    if photo_path != final_path and photo_path.exists():
+        photo_path.unlink(missing_ok=True)
+    return final_path

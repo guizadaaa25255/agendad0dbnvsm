@@ -29,7 +29,7 @@ from app.models import ScheduledStory, StoryLog, TelegramAccount
 from app.schemas import StoryResponse, StoryUpdateRequest, StoryLogResponse
 from app.scheduler import schedule_story_job, cancel_story_job
 from app.telegram_client import toggle_story_pinned_on_telegram
-from app.media_utils import prepare_story_video
+from app.media_utils import prepare_story_video, prepare_story_photo
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
 
@@ -55,7 +55,8 @@ def _serialize_story(story: ScheduledStory, db: Session = None, accounts_map: di
     logs_data = []
     if story.logs:
         for l in story.logs:
-            created_loc = l.created_at.replace(tzinfo=APP_TIMEZONE) if l.created_at.tzinfo is None else l.created_at.astimezone(APP_TIMEZONE)
+            created_utc = l.created_at.replace(tzinfo=timezone.utc) if l.created_at.tzinfo is None else l.created_at
+            created_loc = created_utc.astimezone(APP_TIMEZONE)
             logs_data.append({
                 "id": l.id,
                 "story_id": l.story_id,
@@ -184,9 +185,11 @@ async def create_story(
                 )
             await out_file.write(content)
 
-    # 5.1 Prepara/normaliza o vídeo para o padrão oficial de Stories do Telegram (MP4 H.264 720x1280 + remove áudio se solicitado)
+    # 5.1 Prepara a mídia para o padrão oficial do Telegram Stories
     audio_removed = False
-    if media_type == "video":
+    if media_type == "photo":
+        dest_path = await asyncio.to_thread(prepare_story_photo, dest_path)
+    elif media_type == "video":
         try:
             dest_path = await asyncio.to_thread(
                 prepare_story_video, dest_path, remove_audio=remove_audio, allow_reencode=False
@@ -200,7 +203,7 @@ async def create_story(
                 detail=f"Não foi possível processar o vídeo para o Telegram: {exc}"
             )
 
-    # 6. Registra no banco de dados (incluindo backup binário da mídia para nuvem)
+    # 6. Registra no banco de dados (horário local de Fortaleza sem tzinfo evita shift UTC no PostgreSQL)
     media_bytes = dest_path.read_bytes() if dest_path.exists() else None
     story = ScheduledStory(
         account_id=account_id,
@@ -208,7 +211,7 @@ async def create_story(
         media_type=media_type,
         media_data=media_bytes,
         caption=caption.strip() if caption else None,
-        scheduled_time=scheduled_dt_fortaleza,
+        scheduled_time=scheduled_dt_fortaleza.replace(tzinfo=None),
         period=period,
         pinned=pinned,
         privacy=privacy,
@@ -314,8 +317,10 @@ def update_story(story_id: int, payload: StoryUpdateRequest, db: Session = Depen
         if new_time_fortaleza <= now_fortaleza:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="O novo horário deve ser futuro.")
 
-        story.scheduled_time = new_time_fortaleza
+        story.scheduled_time = new_time_fortaleza.replace(tzinfo=None)
         story.status = "SCHEDULED"
+        story.retry_count = 0
+        story.error_message = None
         schedule_story_job(story.id, new_time_fortaleza)
 
         log_entry = StoryLog(

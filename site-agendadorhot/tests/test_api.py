@@ -229,3 +229,21 @@ def test_media_restores_from_db_when_disk_wiped(account_id):
 
     # Limpeza
     client.delete(f"/api/stories/{story_data['id']}")
+
+
+def test_prepare_story_photo_converts_rgba_png_to_jpeg(tmp_path):
+    from PIL import Image
+    from app.media_utils import prepare_story_photo
+
+    png_path = tmp_path / "big_rgba.png"
+    img = Image.new("RGBA", (2160, 3836), (255, 100, 180, 200))
+    img.save(png_path, format="PNG")
+
+    out_path = prepare_story_photo(png_path)
+    assert out_path.suffix == ".jpg"
+    assert out_path.exists()
+    with Image.open(out_path) as out_im:
+        assert out_im.format == "JPEG"
+        assert out_im.mode == "RGB"
+        assert out_im.width <= 1080
+        assert out_im.height <= 1920
