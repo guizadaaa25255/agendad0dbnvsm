@@ -102,3 +102,64 @@ def format_text(payload: FormatFontRequest):
         "preview": final_preview,
         "font_label": font_data.get("label", payload.font)
     }
+
+
+@router.get("/debug-grid")
+async def debug_font_grid(pack: str = "pinkcandyy"):
+    """Gera um grid com todos os stickers do pack numerados para inspeção visual exata."""
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+    from telethon import TelegramClient, functions, types
+    from telethon.sessions import StringSession
+    from fastapi.responses import Response
+    from app.database import SessionLocal
+    from app.models import TelegramAccount
+    from app.security import decrypt_session
+    from app.telegram_client import account_credentials
+
+    db = SessionLocal()
+    try:
+        acc = db.query(TelegramAccount).filter(TelegramAccount.is_active == True).first()
+        if not acc:
+            raise HTTPException(status_code=400, detail="Nenhuma conta ativa")
+        session_str = decrypt_session(acc.encrypted_session)
+        cid, chash = account_credentials(acc)
+        client = TelegramClient(StringSession(session_str), cid, chash)
+        await client.connect()
+        try:
+            res = await client(functions.messages.GetStickerSetRequest(
+                stickerset=types.InputStickerSetShortName(short_name=pack),
+                hash=0
+            ))
+            docs = res.documents
+            cols = 6
+            rows = (len(docs) + cols - 1) // cols
+            cell_w, cell_h = 100, 120
+            grid = Image.new("RGBA", (cols * cell_w, rows * cell_h), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(grid)
+
+            for i, doc in enumerate(docs):
+                r = i // cols
+                c = i % cols
+                x0 = c * cell_w
+                y0 = r * cell_h
+
+                buf = BytesIO()
+                await client.download_media(doc, file=buf)
+                buf.seek(0)
+                try:
+                    sim = Image.open(buf).convert("RGBA").resize((80, 80))
+                    grid.paste(sim, (x0 + 10, y0 + 5), sim)
+                except Exception:
+                    pass
+
+                draw.text((x0 + 10, y0 + 90), f"#{i} {str(doc.id)[-6:]}", fill=(0, 0, 0))
+
+            out_buf = BytesIO()
+            grid.save(out_buf, format="PNG")
+            return Response(content=out_buf.getvalue(), media_type="image/png")
+        finally:
+            await client.disconnect()
+    finally:
+        db.close()
+
