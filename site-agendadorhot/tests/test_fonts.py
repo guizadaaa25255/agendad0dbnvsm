@@ -38,3 +38,22 @@ def test_format_font_not_spaced():
     assert "html" in data
     assert "<tg-emoji" in data["html"]
     assert data["preview"] == "BOA"
+
+def test_pinkcandyy_boa_tarde():
+    response = client.post("/api/fonts/format", json={
+        "text": "BOA TARDE",
+        "font": "pinkcandyy",
+        "spaced": True
+    })
+    assert response.status_code == 200
+    data = response.json()
+    html = data["html"]
+    # Garante que cada letra de BOA TARDE usa o ID correto do grid real
+    assert 'emoji-id="5015133195851531287"' in html  # B (#1)
+    assert 'emoji-id="5015059322414039797"' in html  # O (#13)
+    assert 'emoji-id="5015163363701818454"' in html  # A (#0)
+    assert 'emoji-id="5015085191002063892"' in html  # T (#18)
+    assert 'emoji-id="5015318811453162576"' in html  # R (#16)
+    assert 'emoji-id="5014912005035787330"' in html  # D (#42)
+    assert 'emoji-id="5017204830377083728"' in html  # E (#3)
+
