@@ -1,4 +1,6 @@
+import time
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError, DBAPIError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import DATABASE_URL, BASE_DIR
 
@@ -10,7 +12,13 @@ engine_kwargs = {
 if is_sqlite:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
-    engine_kwargs["connect_args"] = {"connect_timeout": 10}
+    engine_kwargs["connect_args"] = {
+        "connect_timeout": 20,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
     engine_kwargs["pool_pre_ping"] = True
     engine_kwargs["pool_recycle"] = 180
     engine_kwargs["pool_size"] = 5
@@ -22,6 +30,40 @@ engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
 Base = declarative_base()
+
+
+def run_db_with_retry(db, fn, retries: int = 3, delay: float = 1.0):
+    """Executa uma operação de leitura no banco com reconexão automática em caso de queda SSL/cold-start."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return fn(db)
+        except (OperationalError, DBAPIError) as exc:
+            last_err = exc
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            if attempt < retries - 1:
+                try:
+                    engine.dispose()
+                except Exception:
+                    pass
+                time.sleep(delay * (attempt + 1))
+                # Reabre uma sessão limpa para a próxima tentativa
+                fresh = SessionLocal()
+                try:
+                    return fn(fresh)
+                except (OperationalError, DBAPIError) as exc2:
+                    last_err = exc2
+                    try:
+                        fresh.rollback()
+                    except Exception:
+                        pass
+                finally:
+                    fresh.close()
+    if last_err:
+        raise last_err
 
 
 def get_db():

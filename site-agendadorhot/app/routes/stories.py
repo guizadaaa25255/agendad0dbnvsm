@@ -24,7 +24,7 @@ from app.config import (
     ALLOWED_EXTENSIONS,
     APP_TIMEZONE
 )
-from app.database import get_db
+from app.database import get_db, run_db_with_retry
 from app.models import ScheduledStory, StoryLog, TelegramAccount
 from app.schemas import StoryResponse, StoryUpdateRequest, StoryLogResponse
 from app.scheduler import schedule_story_job, cancel_story_job
@@ -246,26 +246,29 @@ def list_stories(
     db: Session = Depends(get_db)
 ):
     """Lista todos os stories cadastrados, ordenados por data."""
-    query = db.query(ScheduledStory).options(selectinload(ScheduledStory.logs))
+    def _fetch(session: Session):
+        query = session.query(ScheduledStory).options(selectinload(ScheduledStory.logs))
 
-    if account_id is not None:
-        query = query.filter(ScheduledStory.account_id == account_id)
+        if account_id is not None:
+            query = query.filter(ScheduledStory.account_id == account_id)
 
-    if status_filter and status_filter.upper() != "ALL":
-        query = query.filter(ScheduledStory.status == status_filter.upper())
+        if status_filter and status_filter.upper() != "ALL":
+            query = query.filter(ScheduledStory.status == status_filter.upper())
 
-    stories = query.order_by(ScheduledStory.scheduled_time.desc()).all()
+        stories = query.order_by(ScheduledStory.scheduled_time.desc()).all()
 
-    accounts_map = {
-        row.id: f"{row.first_name or row.username or ''} ({row.phone})".strip()
-        for row in db.query(
-            TelegramAccount.id,
-            TelegramAccount.first_name,
-            TelegramAccount.username,
-            TelegramAccount.phone
-        ).all()
-    }
-    return [_serialize_story(s, db, accounts_map=accounts_map) for s in stories]
+        accounts_map = {
+            row.id: f"{row.first_name or row.username or ''} ({row.phone})".strip()
+            for row in session.query(
+                TelegramAccount.id,
+                TelegramAccount.first_name,
+                TelegramAccount.username,
+                TelegramAccount.phone
+            ).all()
+        }
+        return [_serialize_story(s, session, accounts_map=accounts_map) for s in stories]
+
+    return run_db_with_retry(db, _fetch)
 
 
 @router.get("/{story_id}", response_model=StoryResponse)

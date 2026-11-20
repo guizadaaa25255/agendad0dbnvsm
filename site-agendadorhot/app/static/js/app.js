@@ -200,7 +200,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Polling automático a cada 10 segundos para manter status e logs sincronizados
   autoRefreshTimer = setInterval(() => {
-    loadStories(true);
+    if (savedAccountsList.length === 0 && !isCheckingAccounts) {
+      checkAccountStatus(null, true);
+    } else {
+      loadStories(true);
+    }
   }, 10000);
 });
 
@@ -545,23 +549,69 @@ function renderAccountsHeader() {
   }).join('');
 }
 
-async function checkAccountStatus(preferredAccountId = null) {
+let isCheckingAccounts = false;
+let accountRetryTimer = null;
+
+async function checkAccountStatus(preferredAccountId = null, silent = false) {
+  if (isCheckingAccounts) return;
+  isCheckingAccounts = true;
+
+  if (accountRetryTimer) {
+    clearTimeout(accountRetryTimer);
+    accountRetryTimer = null;
+  }
+
   const loading = document.getElementById('accountLoading');
   const select = document.getElementById('accountSelect');
 
+  if (loading && savedAccountsList.length === 0) {
+    loading.classList.remove('hidden');
+    loading.style.cursor = 'default';
+    loading.onclick = null;
+    loading.innerHTML = '<span class="pulse-dot"></span> Verificando conexão...';
+  }
+
   try {
-    let res = await fetch('/api/auth/status');
-    if (!res.ok) {
-      await new Promise(r => setTimeout(r, 1500));
-      res = await fetch('/api/auth/status');
+    const retryDelays = [1500, 2500, 3500, 4500, 5500];
+    let res = null;
+
+    for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+      try {
+        res = await fetch('/api/auth/status', { cache: 'no-store' });
+        if (res && res.ok) break;
+      } catch (netErr) {
+        res = null;
+      }
+
+      if (attempt < retryDelays.length) {
+        if (loading && savedAccountsList.length === 0 && attempt >= 1) {
+          loading.innerHTML = '<span class="pulse-dot"></span> Acordando servidor...';
+        }
+        await new Promise(r => setTimeout(r, retryDelays[attempt]));
+      }
     }
-    if (!res.ok) {
-      loading.classList.add('hidden');
-      showToast('Servidor reiniciando ou banco indisponível no momento. Tente atualizar em alguns segundos.', 'error');
+
+    if (!res || !res.ok) {
+      if (loading && savedAccountsList.length === 0) {
+        loading.classList.remove('hidden');
+        loading.style.cursor = 'pointer';
+        loading.innerHTML = '<span class="pulse-dot"></span> Reconectando... (clique para tentar agora)';
+        loading.onclick = () => checkAccountStatus(preferredAccountId, false);
+      }
+      if (!silent) {
+        showToast('Servidor acordando. Reconectando automaticamente...', 'info');
+      }
+      accountRetryTimer = setTimeout(() => {
+        checkAccountStatus(preferredAccountId, true);
+      }, 5000);
       return;
     }
+
     const data = await safeJson(res);
-    loading.classList.add('hidden');
+    if (loading) {
+      loading.classList.add('hidden');
+      loading.onclick = null;
+    }
 
     savedAccountsList = data.accounts || [];
 
@@ -621,7 +671,17 @@ async function checkAccountStatus(preferredAccountId = null) {
     loadStories();
     preloadAllStoriesCache();
   } catch (err) {
-    loading.classList.add('hidden');
+    if (loading && savedAccountsList.length === 0) {
+      loading.classList.remove('hidden');
+      loading.style.cursor = 'pointer';
+      loading.innerHTML = '<span class="pulse-dot"></span> Reconectando... (clique para tentar agora)';
+      loading.onclick = () => checkAccountStatus(preferredAccountId, false);
+    }
+    accountRetryTimer = setTimeout(() => {
+      checkAccountStatus(preferredAccountId, true);
+    }, 5000);
+  } finally {
+    isCheckingAccounts = false;
   }
 }
 

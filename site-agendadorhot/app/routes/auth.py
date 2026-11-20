@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.database import get_db, run_db_with_retry
 from app.schemas import (
     SendCodeRequest,
     SendCodeResponse,
@@ -25,13 +25,14 @@ router = APIRouter(prefix="/api/auth", tags=["Autenticação Telegram"])
 @router.get("/status", response_model=AccountStatusResponse)
 async def check_status(db: Session = Depends(get_db)):
     """Lista as contas conectadas. Nunca expõe sessão, api_id ou api_hash."""
+    active_accounts = run_db_with_retry(db, list_active_accounts)
     accounts = [
         AccountItem(
             id=a.id, phone=a.phone, first_name=a.first_name, username=a.username,
             is_premium=bool(a.is_premium), connected_at=a.connected_at,
             avatar_url=f"/api/auth/avatar/{a.id}?v={int(a.updated_at.timestamp()) if a.updated_at else 1}"
         )
-        for a in list_active_accounts(db)
+        for a in active_accounts
     ]
     return AccountStatusResponse(connected=len(accounts) > 0, accounts=accounts)
 
