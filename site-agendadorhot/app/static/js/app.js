@@ -934,10 +934,18 @@ async function handleScheduleSubmit(e) {
   spinner.classList.remove('hidden');
 
   try {
-    const res = await fetch('/api/stories', {
+    let res = await fetch('/api/stories', {
       method: 'POST',
       body: formData
     });
+    if (res.status >= 500 && res.status <= 504) {
+      btnText.innerText = 'Reconectando ao servidor...';
+      await new Promise(r => setTimeout(r, 2000));
+      res = await fetch('/api/stories', {
+        method: 'POST',
+        body: formData
+      });
+    }
     const rawText = await res.text();
     let data = {};
     try {

@@ -16,6 +16,7 @@ from fastapi import (
     Query,
     status
 )
+from sqlalchemy.exc import OperationalError, DBAPIError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import (
@@ -24,7 +25,7 @@ from app.config import (
     ALLOWED_EXTENSIONS,
     APP_TIMEZONE
 )
-from app.database import get_db, run_db_with_retry
+from app.database import get_db, run_db_with_retry, SessionLocal, engine
 from app.models import ScheduledStory, StoryLog, TelegramAccount
 from app.schemas import StoryResponse, StoryUpdateRequest, StoryLogResponse
 from app.scheduler import schedule_story_job, cancel_story_job
@@ -115,7 +116,10 @@ async def create_story(
     Cria e agenda um novo story para publicação automática no horário marcado.
     """
     # 0. A conta escolhida precisa existir e estar conectada
-    account = db.query(TelegramAccount).filter(TelegramAccount.id == account_id, TelegramAccount.is_active == True).first()
+    account = run_db_with_retry(
+        db,
+        lambda s: s.query(TelegramAccount).filter(TelegramAccount.id == account_id, TelegramAccount.is_active == True).first()
+    )
     if not account:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Conta do Telegram inválida ou desconectada. Conecte/escolha uma conta.")
 
@@ -204,39 +208,80 @@ async def create_story(
             )
 
     # 6. Registra no banco de dados (horário local de Fortaleza sem tzinfo evita shift UTC no PostgreSQL)
-    media_bytes = dest_path.read_bytes() if dest_path.exists() else None
-    story = ScheduledStory(
-        account_id=account_id,
-        media_path=str(dest_path),
-        media_type=media_type,
-        media_data=media_bytes,
-        caption=caption.strip() if caption else None,
-        scheduled_time=scheduled_dt_fortaleza.replace(tzinfo=None),
-        period=period,
-        pinned=pinned,
-        privacy=privacy,
-        status="SCHEDULED",
-        retry_count=0
-    )
-    db.add(story)
-    db.commit()
-    db.refresh(story)
+    # Limita backup binário no banco a 8MB para evitar estouro de RAM/timeout em vídeos pesados na nuvem
+    max_db_media_bytes = 8 * 1024 * 1024
+    file_size = dest_path.stat().st_size if dest_path.exists() else 0
+    media_bytes = dest_path.read_bytes() if (dest_path.exists() and file_size <= max_db_media_bytes) else None
 
-    # 7. Adiciona log inicial
     audio_note = " Áudio removido do vídeo conforme selecionado." if audio_removed else ""
-    init_log = StoryLog(
-        story_id=story.id,
-        attempt_number=0,
-        status="INFO",
-        message=f"Story criado e agendado para {scheduled_dt_fortaleza.strftime('%d/%m/%Y às %H:%M:%S')} (Fuso: America/Fortaleza).{audio_note}"
-    )
-    db.add(init_log)
-    db.commit()
+    log_msg = f"Story criado e agendado para {scheduled_dt_fortaleza.strftime('%d/%m/%Y às %H:%M:%S')} (Fuso: America/Fortaleza).{audio_note}"
+
+    def _insert_story(session: Session, blob: Optional[bytes]):
+        s_obj = ScheduledStory(
+            account_id=account_id,
+            media_path=str(dest_path),
+            media_type=media_type,
+            media_data=blob,
+            caption=caption.strip() if caption else None,
+            scheduled_time=scheduled_dt_fortaleza.replace(tzinfo=None),
+            period=period,
+            pinned=pinned,
+            privacy=privacy,
+            status="SCHEDULED",
+            retry_count=0
+        )
+        session.add(s_obj)
+        session.commit()
+        session.refresh(s_obj)
+
+        init_log = StoryLog(
+            story_id=s_obj.id,
+            attempt_number=0,
+            status="INFO",
+            message=log_msg
+        )
+        session.add(init_log)
+        session.commit()
+        session.refresh(s_obj)
+        return s_obj, _serialize_story(s_obj, session)
+
+    story = None
+    serialized = None
+    last_db_err = None
+    # Tenta com backup no banco (se <= 8MB); se houver queda SSL/timeout/limite de pacote, recicla pool e faz fallback sem blob
+    attempts = [media_bytes, media_bytes, None] if media_bytes is not None else [None, None]
+    for idx, blob_candidate in enumerate(attempts):
+        use_fresh = idx > 0
+        sess = SessionLocal() if use_fresh else db
+        try:
+            story, serialized = _insert_story(sess, blob_candidate)
+            last_db_err = None
+            break
+        except (OperationalError, DBAPIError) as exc:
+            last_db_err = exc
+            try:
+                sess.rollback()
+            except Exception:
+                pass
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+            await asyncio.sleep(0.8)
+        finally:
+            if use_fresh:
+                sess.close()
+
+    if last_db_err is not None or story is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar agendamento no banco: {type(last_db_err).__name__}: {str(last_db_err)[:180]}"
+        )
 
     # 8. Agenda tarefa no APScheduler
     schedule_story_job(story.id, scheduled_dt_fortaleza)
 
-    return _serialize_story(story, db)
+    return serialized
 
 
 @router.get("", response_model=List[StoryResponse])
